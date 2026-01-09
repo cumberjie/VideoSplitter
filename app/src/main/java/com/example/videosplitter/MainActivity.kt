@@ -146,8 +146,8 @@ class MainActivity : AppCompatActivity() {
                     // 音频：AAC 128k（避免体积爆炸）
                     val cmd = buildString {
                         append("-hide_banner -y ")
-                        append("-i \"").append(inputPath).append("\" ")
                         append("-ss ").append(start).append(" ")
+                        append("-i \"").append(inputPath).append("\" ")
                         append("-t ").append(segmentLen).append(" ")
                         append("-map 0:v:0? -map 0:a:0? ")
                         append("-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p ")
