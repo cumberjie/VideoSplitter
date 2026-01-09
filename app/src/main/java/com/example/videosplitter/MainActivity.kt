@@ -8,6 +8,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import java.io.FileOutputStream
@@ -197,11 +198,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun probeDurationSeconds(inputPath: String): Double {
         val cmd = "-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"$inputPath\""
-        val session = FFmpegKit.execute(cmd)
+        val session = FFprobeKit.execute(cmd)
         if (!ReturnCode.isSuccess(session.returnCode)) return -1.0
 
         val out = (session.output ?: "").trim()
-        // out 可能是 "123.456"
         return out.toDoubleOrNull() ?: -1.0
     }
 
