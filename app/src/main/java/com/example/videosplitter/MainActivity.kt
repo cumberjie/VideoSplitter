@@ -9,11 +9,11 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import kotlin.math.ceil
 
 class MainActivity : AppCompatActivity() {
 
@@ -67,7 +67,7 @@ class MainActivity : AppCompatActivity() {
             }
             selectedVideoPath = inputFile.absolutePath
             
-            // 获取视频时长（用于进度计算）
+            // 获取视频时长
             videoDurationMs = getVideoDuration(inputFile.absolutePath)
             
             btnSplit.isEnabled = true
@@ -140,61 +140,85 @@ class MainActivity : AppCompatActivity() {
         if (!outputDir.exists()) outputDir.mkdirs()
 
         val timestamp = System.currentTimeMillis()
-        val outputPattern = File(outputDir, "split_${timestamp}_%03d.mp4").absolutePath
 
         // 更新 UI 状态
         progressBar.visibility = View.VISIBLE
         progressBar.isIndeterminate = false
+        progressBar.max = 100
         progressBar.progress = 0
         btnSplit.isEnabled = false
         btnSelectVideo.isEnabled = false
-        tvStatus.text = "正在分割视频，请稍候...\n(重编码以确保精准时间，可能需要几分钟)"
 
-        // ========== 关键修改：使用重编码实现精准切割 ==========
-        val command = "-i \"$selectedVideoPath\" " +
-                "-c:v libx264 -crf 18 -preset fast " +
-                "-c:a aac -b:a 192k " +
-                "-force_key_frames \"expr:gte(t,n_forced*$interval)\" " +
-                "-f segment -segment_time $interval " +
-                "-reset_timestamps 1 " +
-                "-y \"$outputPattern\""
+        // 计算总共需要分割的段数
+        val durationSec = videoDurationMs / 1000.0
+        val totalSegments = ceil(durationSec / interval).toInt()
+        
+        tvStatus.text = "正在分割视频...\n预计生成 $totalSegments 个片段"
 
-        // 设置进度回调
-        FFmpegKitConfig.enableStatisticsCallback { statistics ->
-            if (videoDurationMs > 0) {
-                // ========== 修复：显式转换为 Long ==========
-                val timeMs = statistics.time.toLong()
-                val progress = ((timeMs.toDouble() / videoDurationMs.toDouble()) * 100).toInt().coerceIn(0, 100)
+        // 在后台线程执行分割
+        executor.execute {
+            var successCount = 0
+            var failedCount = 0
+
+            // ========== 关键修改：逐段分割，确保精准时间 ==========
+            for (i in 0 until totalSegments) {
+                // 计算当前段的起始时间（秒）
+                val startTimeSec = i * interval
+                
+                // 输出文件名：split_时间戳_序号.mp4
+                val outputFile = File(outputDir, "split_${timestamp}_${String.format("%03d", i + 1)}.mp4").absolutePath
+
+                // 构建 FFmpeg 命令
+                // -ss: 起始时间（放在 -i 前面可以快速定位）
+                // -i: 输入文件
+                // -t: 持续时间（精确控制每段时长）
+                // -c:v libx264: H.264 编码
+                // -crf 18: 视觉无损质量
+                // -preset fast: 编码速度
+                // -c:a aac: AAC 音频编码
+                // -avoid_negative_ts make_zero: 避免时间戳问题
+                val command = "-ss $startTimeSec " +
+                        "-i \"$selectedVideoPath\" " +
+                        "-t $interval " +
+                        "-c:v libx264 -crf 18 -preset fast " +
+                        "-c:a aac -b:a 192k " +
+                        "-avoid_negative_ts make_zero " +
+                        "-y \"$outputFile\""
+
+                // 更新进度
+                val currentSegment = i + 1
                 runOnUiThread {
+                    val progress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
                     progressBar.progress = progress
-                    tvStatus.text = "正在分割视频... $progress%\n已处理: ${formatDuration(timeMs)}"
+                    tvStatus.text = "正在分割视频...\n处理第 $currentSegment / $totalSegments 段"
+                }
+
+                // 执行 FFmpeg 命令
+                val session = FFmpegKit.execute(command)
+                
+                if (ReturnCode.isSuccess(session.returnCode)) {
+                    successCount++
+                } else {
+                    failedCount++
                 }
             }
-        }
 
-        // 在后台线程执行 FFmpeg
-        executor.execute {
-            val session = FFmpegKit.execute(command)
-            
+            // 分割完成，更新 UI
             runOnUiThread {
                 progressBar.visibility = View.GONE
                 btnSplit.isEnabled = true
                 btnSelectVideo.isEnabled = true
-                
-                if (ReturnCode.isSuccess(session.returnCode)) {
-                    // 统计生成的文件数量
-                    val count = outputDir.listFiles { f -> 
-                        f.name.startsWith("split_$timestamp") 
-                    }?.size ?: 0
-                    
+
+                if (failedCount == 0) {
                     tvStatus.text = "✅ 分割完成！\n" +
-                            "生成了 $count 个视频片段\n" +
+                            "生成了 $successCount 个视频片段\n" +
                             "每段精准 $interval 秒\n" +
                             "保存位置: Movies/VideoSplitter"
                 } else {
-                    // 获取错误信息
-                    val errorLog = session.failStackTrace ?: "未知错误"
-                    tvStatus.text = "❌ 分割失败\n错误码: ${session.returnCode}\n$errorLog"
+                    tvStatus.text = "⚠️ 分割部分完成\n" +
+                            "成功: $successCount 个\n" +
+                            "失败: $failedCount 个\n" +
+                            "保存位置: Movies/VideoSplitter"
                 }
             }
         }
