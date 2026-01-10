@@ -151,15 +151,6 @@ class MainActivity : AppCompatActivity() {
         tvStatus.text = "正在分割视频，请稍候...\n(重编码以确保精准时间，可能需要几分钟)"
 
         // ========== 关键修改：使用重编码实现精准切割 ==========
-        // -c:v libx264        : 使用 H.264 编码器重编码视频
-        // -crf 18             : 质量控制，18 为视觉无损（0=完全无损但文件巨大）
-        // -preset fast        : 编码速度，fast 平衡速度和质量
-        // -c:a aac -b:a 192k  : 音频重编码为 AAC 192kbps
-        // -force_key_frames   : 强制在每个分割点插入关键帧，确保精准
-        // -f segment          : 分段输出模式
-        // -segment_time       : 每段时长
-        // -reset_timestamps 1 : 每段时间戳从 0 开始
-        
         val command = "-i \"$selectedVideoPath\" " +
                 "-c:v libx264 -crf 18 -preset fast " +
                 "-c:a aac -b:a 192k " +
@@ -171,8 +162,9 @@ class MainActivity : AppCompatActivity() {
         // 设置进度回调
         FFmpegKitConfig.enableStatisticsCallback { statistics ->
             if (videoDurationMs > 0) {
-                val timeMs = statistics.time
-                val progress = ((timeMs.toFloat() / videoDurationMs) * 100).toInt().coerceIn(0, 100)
+                // ========== 修复：显式转换为 Long ==========
+                val timeMs = statistics.time.toLong()
+                val progress = ((timeMs.toDouble() / videoDurationMs.toDouble()) * 100).toInt().coerceIn(0, 100)
                 runOnUiThread {
                     progressBar.progress = progress
                     tvStatus.text = "正在分割视频... $progress%\n已处理: ${formatDuration(timeMs)}"
