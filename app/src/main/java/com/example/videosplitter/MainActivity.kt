@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressContainer: LinearLayout
     private lateinit var tvProgressPercent: TextView
     private lateinit var tvProgressDetail: TextView
-    private lateinit var spinnerProgress: ProgressBar  // 旋转加载图标
+    private lateinit var spinnerProgress: ProgressBar
   
     // 快捷秒数选择按钮（去掉了10秒）
     private lateinit var btn3s: Button
@@ -34,8 +34,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btn5s: Button
   
     private var selectedVideoPath: String? = null
-    private var originalFileName: String = "video"  // 保存原始文件名（不含扩展名）
-    private var videoDurationMs: Long = 0  // 视频总时长（毫秒）
+    private var originalFileName: String = "video"
+    private var videoDurationMs: Long = 0
     private val executor = Executors.newSingleThreadExecutor()
 
     private val videoPickerLauncher = registerForActivityResult(
@@ -61,9 +61,8 @@ class MainActivity : AppCompatActivity() {
         progressContainer = findViewById(R.id.progressContainer)
         tvProgressPercent = findViewById(R.id.tvProgressPercent)
         tvProgressDetail = findViewById(R.id.tvProgressDetail)
-        spinnerProgress = findViewById(R.id.spinnerProgress)  // 旋转图标
+        spinnerProgress = findViewById(R.id.spinnerProgress)
       
-        // 快捷秒数按钮（只有3个）
         btn3s = findViewById(R.id.btn3s)
         btn4s = findViewById(R.id.btn4s)
         btn5s = findViewById(R.id.btn5s)
@@ -73,7 +72,6 @@ class MainActivity : AppCompatActivity() {
         btnSelectVideo.setOnClickListener { videoPickerLauncher.launch("video/*") }
         btnSplit.setOnClickListener { startSplitting() }
       
-        // 快捷秒数选择按钮 - 点击后填入输入框
         btn3s.setOnClickListener { etInterval.setText("3") }
         btn4s.setOnClickListener { etInterval.setText("4") }
         btn5s.setOnClickListener { etInterval.setText("5") }
@@ -84,17 +82,14 @@ class MainActivity : AppCompatActivity() {
             val fileName = getFileName(uri)
             tvSelectedVideo.text = "已选择: $fileName"
           
-            // 保存原始文件名（去掉扩展名）
             originalFileName = fileName.substringBeforeLast(".")
           
-            // 复制视频到缓存目录
             val inputFile = File(cacheDir, "input_video.mp4")
             contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(inputFile).use { output -> input.copyTo(output) }
             }
             selectedVideoPath = inputFile.absolutePath
           
-            // 获取视频时长
             videoDurationMs = getVideoDuration(inputFile.absolutePath)
           
             btnSplit.isEnabled = true
@@ -115,9 +110,6 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
-    /**
-     * 获取视频时长（毫秒）
-     */
     private fun getVideoDuration(path: String): Long {
         return try {
             val retriever = android.media.MediaMetadataRetriever()
@@ -132,9 +124,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 格式化时长显示
-     */
     private fun formatDuration(ms: Long): String {
         val totalSeconds = ms / 1000
         val minutes = totalSeconds / 60
@@ -143,7 +132,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startSplitting() {
-        // 验证输入
         val intervalText = etInterval.text.toString()
         if (intervalText.isEmpty()) {
             tvStatus.text = "请输入分割间隔秒数"
@@ -159,16 +147,14 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 创建输出目录
         val outputDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
             "VideoSplitter"
         )
         if (!outputDir.exists()) outputDir.mkdirs()
 
-        // 更新 UI 状态 - 显示美观的进度区域
         progressContainer.visibility = View.VISIBLE
-        spinnerProgress.visibility = View.VISIBLE  // 显示旋转图标
+        spinnerProgress.visibility = View.VISIBLE
         progressBar.max = 100
         progressBar.progress = 0
         tvProgressPercent.text = "正在分割 0%"
@@ -176,36 +162,30 @@ class MainActivity : AppCompatActivity() {
         btnSplit.isEnabled = false
         btnSelectVideo.isEnabled = false
 
-        // 计算总共需要分割的段数
         val durationSec = videoDurationMs / 1000.0
         val totalSegments = ceil(durationSec / interval).toInt()
       
         tvStatus.text = "预计生成 $totalSegments 个片段"
 
-        // 在后台线程执行分割
         executor.execute {
             var successCount = 0
             var failedCount = 0
 
-            // ========== 逐段分割，确保精准时间 ==========
             for (i in 0 until totalSegments) {
-                // 计算当前段的起始时间（秒）
                 val startTimeSec = i * interval
               
-                // 输出文件名：源文件名_01.mp4, 源文件名_02.mp4 ...
                 val segmentNumber = String.format("%02d", i + 1)
                 val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4").absolutePath
 
-                // 构建 FFmpeg 命令
+                // ========== 关键修复：使用正确的转义引号 ==========
                 val command = "-ss $startTimeSec " +
-                        "-i \"$selectedVideoPath\" " +
+                        "-i \\\"$selectedVideoPath\\\" " +
                         "-t $interval " +
                         "-c:v libx264 -crf 18 -preset fast " +
                         "-c:a aac -b:a 192k " +
                         "-avoid_negative_ts make_zero " +
-                        "-y \"$outputFile\""
+                        "-y \\\"$outputFile\\\""
 
-                // 更新进度 - 美观显示
                 val currentSegment = i + 1
                 val progress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
               
@@ -215,7 +195,6 @@ class MainActivity : AppCompatActivity() {
                     tvProgressDetail.text = "处理第 $currentSegment / $totalSegments 段"
                 }
 
-                // 执行 FFmpeg 命令
                 val session = FFmpegKit.execute(command)
               
                 if (ReturnCode.isSuccess(session.returnCode)) {
@@ -225,15 +204,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // 分割完成，更新 UI
             runOnUiThread {
-                // 完成时显示100%
                 progressBar.progress = 100
                 tvProgressPercent.text = "分割完成 100%"
                 tvProgressDetail.text = "处理完毕"
-                spinnerProgress.visibility = View.GONE  // 隐藏旋转图标
+                spinnerProgress.visibility = View.GONE
               
-                // 延迟隐藏进度区域
                 progressContainer.postDelayed({
                     progressContainer.visibility = View.GONE
                 }, 2000)
