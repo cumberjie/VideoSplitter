@@ -20,11 +20,22 @@ jobs:
       with:
         gradle-version: 8.7
 
-    - name: Build Debug APK
-      run: gradle assembleDebug
+    # ========== 新增：解码签名文件 ==========
+    - name: Decode Keystore
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/release.jks
+
+    # ========== 改成构建 Release APK ==========
+    - name: Build Release APK
+      env:
+        KEYSTORE_FILE: ${{ github.workspace }}/release.jks
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: gradle assembleRelease
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: VideoSplitter-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
+        path: app/build/outputs/apk/release/app-release.apk
