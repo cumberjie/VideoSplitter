@@ -28,7 +28,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvProgressDetail: TextView
     private lateinit var spinnerProgress: ProgressBar
   
-    // 快捷秒数选择按钮（去掉了10秒）
+    // 快捷秒数选择按钮
     private lateinit var btn3s: Button
     private lateinit var btn4s: Button
     private lateinit var btn5s: Button
@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
           
             originalFileName = fileName.substringBeforeLast(".")
           
+            // 将视频复制到缓存目录（使用不含空格的文件名避免路径问题）
             val inputFile = File(cacheDir, "input_video.mp4")
             contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(inputFile).use { output -> input.copyTo(output) }
@@ -177,14 +178,20 @@ class MainActivity : AppCompatActivity() {
                 val segmentNumber = String.format("%02d", i + 1)
                 val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4").absolutePath
 
-                // ========== 关键修复：使用正确的转义引号 ==========
-                val command = "-ss $startTimeSec " +
-                        "-i \\\"$selectedVideoPath\\\" " +
-                        "-t $interval " +
-                        "-c:v libx264 -crf 18 -preset fast " +
-                        "-c:a aac -b:a 192k " +
-                        "-avoid_negative_ts make_zero " +
-                        "-y \\\"$outputFile\\\""
+                // ========== 修复：移除转义引号，直接使用路径 ==========
+                // FFmpegKit 内部会正确处理路径，不需要手动添加引号
+                val command = arrayOf(
+                    "-ss", startTimeSec.toString(),
+                    "-i", selectedVideoPath!!,
+                    "-t", interval.toString(),
+                    "-c:v", "libx264",
+                    "-crf", "18",
+                    "-preset", "fast",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-avoid_negative_ts", "make_zero",
+                    "-y", outputFile
+                )
 
                 val currentSegment = i + 1
                 val progress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
@@ -195,7 +202,8 @@ class MainActivity : AppCompatActivity() {
                     tvProgressDetail.text = "处理第 $currentSegment / $totalSegments 段"
                 }
 
-                val session = FFmpegKit.execute(command)
+                // 使用 executeWithArguments 代替 execute，更安全地处理路径
+                val session = FFmpegKit.executeWithArguments(command)
               
                 if (ReturnCode.isSuccess(session.returnCode)) {
                     successCount++
