@@ -7,7 +7,6 @@ plugins {
 
 // ========== 自动下载 AAR 文件的任务 ==========
 val downloadFfmpegAar by tasks.registering {
-    // ========== 改成 min-gpl 文件名 ==========
     val aarFile = file("libs/ffmpeg-kit-min-gpl-7.1.5.aar")
     outputs.file(aarFile)
     
@@ -16,7 +15,6 @@ val downloadFfmpegAar by tasks.registering {
             println("正在下载 ffmpeg-kit-min-gpl-7.1.5.aar ...")
             aarFile.parentFile.mkdirs()
             
-      
             val url = "https://github.com/cumberjie/ffmpeg-kit-full-gpl/releases/download/v2/ffmpeg-kit-min-gpl-7.1.5.aar"
             
             uri(url).toURL().openStream().use { input ->
@@ -40,7 +38,19 @@ android {
     namespace = "com.example.videosplitter"
     compileSdk = 34
 
- 
+    // ========== 新增：签名配置 ==========
+    signingConfigs {
+        create("release") {
+            val keystoreFile = System.getenv("KEYSTORE_FILE")
+            if (!keystoreFile.isNullOrEmpty()) {
+                storeFile = file(keystoreFile)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.videosplitter"
         minSdk = 24
@@ -48,7 +58,6 @@ android {
         versionCode = 2
         versionName = "1.1"
         
-        // ========== 新增：只保留 arm64-v8a 架构 ==========
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -57,8 +66,11 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // ========== 新增：使用签名 ==========
+            signingConfig = signingConfigs.getByName("release")
         }
     }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -75,9 +87,7 @@ dependencies {
     implementation("androidx.activity:activity:1.9.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     
-    // ========== 改成 min-gpl AAR 文件 ==========
     implementation(files("libs/ffmpeg-kit-min-gpl-7.1.5.aar"))
     
-    // ffmpeg-kit 的传递依赖（AAR 不会自动引入，需要手动添加）
     implementation("com.arthenica:smart-exception-java:0.2.1")
 }
