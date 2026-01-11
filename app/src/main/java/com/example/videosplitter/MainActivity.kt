@@ -23,8 +23,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var etInterval: EditText
     private lateinit var progressBar: ProgressBar
+    private lateinit var progressContainer: LinearLayout
+    private lateinit var tvProgressPercent: TextView
+    private lateinit var tvProgressDetail: TextView
+    
+    // 快捷秒数选择按钮
+    private lateinit var btn3s: Button
+    private lateinit var btn4s: Button
+    private lateinit var btn5s: Button
+    private lateinit var btn10s: Button
     
     private var selectedVideoPath: String? = null
+    private var originalFileName: String = "video"  // 保存原始文件名（不含扩展名）
     private var videoDurationMs: Long = 0  // 视频总时长（毫秒）
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -48,17 +58,35 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         etInterval = findViewById(R.id.etInterval)
         progressBar = findViewById(R.id.progressBar)
+        progressContainer = findViewById(R.id.progressContainer)
+        tvProgressPercent = findViewById(R.id.tvProgressPercent)
+        tvProgressDetail = findViewById(R.id.tvProgressDetail)
+        
+        // 快捷秒数按钮
+        btn3s = findViewById(R.id.btn3s)
+        btn4s = findViewById(R.id.btn4s)
+        btn5s = findViewById(R.id.btn5s)
+        btn10s = findViewById(R.id.btn10s)
     }
 
     private fun setupClickListeners() {
         btnSelectVideo.setOnClickListener { videoPickerLauncher.launch("video/*") }
         btnSplit.setOnClickListener { startSplitting() }
+        
+        // 快捷秒数选择按钮 - 点击后填入输入框
+        btn3s.setOnClickListener { etInterval.setText("3") }
+        btn4s.setOnClickListener { etInterval.setText("4") }
+        btn5s.setOnClickListener { etInterval.setText("5") }
+        btn10s.setOnClickListener { etInterval.setText("10") }
     }
 
     private fun handleVideoSelection(uri: Uri) {
         try {
             val fileName = getFileName(uri)
             tvSelectedVideo.text = "已选择: $fileName"
+            
+            // 保存原始文件名（去掉扩展名）
+            originalFileName = fileName.substringBeforeLast(".")
             
             // 复制视频到缓存目录
             val inputFile = File(cacheDir, "input_video.mp4")
@@ -139,13 +167,12 @@ class MainActivity : AppCompatActivity() {
         )
         if (!outputDir.exists()) outputDir.mkdirs()
 
-        val timestamp = System.currentTimeMillis()
-
-        // 更新 UI 状态
-        progressBar.visibility = View.VISIBLE
-        progressBar.isIndeterminate = false
+        // 更新 UI 状态 - 显示美观的进度区域
+        progressContainer.visibility = View.VISIBLE
         progressBar.max = 100
         progressBar.progress = 0
+        tvProgressPercent.text = "正在分割 0%"
+        tvProgressDetail.text = "准备中..."
         btnSplit.isEnabled = false
         btnSelectVideo.isEnabled = false
 
@@ -153,30 +180,23 @@ class MainActivity : AppCompatActivity() {
         val durationSec = videoDurationMs / 1000.0
         val totalSegments = ceil(durationSec / interval).toInt()
         
-        tvStatus.text = "正在分割视频...\n预计生成 $totalSegments 个片段"
+        tvStatus.text = "预计生成 $totalSegments 个片段"
 
         // 在后台线程执行分割
         executor.execute {
             var successCount = 0
             var failedCount = 0
 
-            // ========== 关键修改：逐段分割，确保精准时间 ==========
+            // ========== 逐段分割，确保精准时间 ==========
             for (i in 0 until totalSegments) {
                 // 计算当前段的起始时间（秒）
                 val startTimeSec = i * interval
                 
-                // 输出文件名：split_时间戳_序号.mp4
-                val outputFile = File(outputDir, "split_${timestamp}_${String.format("%03d", i + 1)}.mp4").absolutePath
+                // 输出文件名：源文件名_01.mp4, 源文件名_02.mp4 ...
+                val segmentNumber = String.format("%02d", i + 1)
+                val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4").absolutePath
 
                 // 构建 FFmpeg 命令
-                // -ss: 起始时间（放在 -i 前面可以快速定位）
-                // -i: 输入文件
-                // -t: 持续时间（精确控制每段时长）
-                // -c:v libx264: H.264 编码
-                // -crf 18: 视觉无损质量
-                // -preset fast: 编码速度
-                // -c:a aac: AAC 音频编码
-                // -avoid_negative_ts make_zero: 避免时间戳问题
                 val command = "-ss $startTimeSec " +
                         "-i \"$selectedVideoPath\" " +
                         "-t $interval " +
@@ -185,12 +205,14 @@ class MainActivity : AppCompatActivity() {
                         "-avoid_negative_ts make_zero " +
                         "-y \"$outputFile\""
 
-                // 更新进度
+                // 更新进度 - 美观显示
                 val currentSegment = i + 1
+                val progress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
+                
                 runOnUiThread {
-                    val progress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
                     progressBar.progress = progress
-                    tvStatus.text = "正在分割视频...\n处理第 $currentSegment / $totalSegments 段"
+                    tvProgressPercent.text = "正在分割 $progress%"
+                    tvProgressDetail.text = "处理第 $currentSegment / $totalSegments 段"
                 }
 
                 // 执行 FFmpeg 命令
@@ -205,14 +227,24 @@ class MainActivity : AppCompatActivity() {
 
             // 分割完成，更新 UI
             runOnUiThread {
-                progressBar.visibility = View.GONE
+                // 完成时显示100%
+                progressBar.progress = 100
+                tvProgressPercent.text = "分割完成 100%"
+                tvProgressDetail.text = "处理完毕"
+                
+                // 延迟隐藏进度区域
+                progressContainer.postDelayed({
+                    progressContainer.visibility = View.GONE
+                }, 2000)
+                
                 btnSplit.isEnabled = true
                 btnSelectVideo.isEnabled = true
 
                 if (failedCount == 0) {
                     tvStatus.text = "✅ 分割完成！\n" +
                             "生成了 $successCount 个视频片段\n" +
-                            "每段精准 $interval 秒\n" +
+                            "每段精准 ${etInterval.text} 秒\n" +
+                            "文件命名: ${originalFileName}_01 ~ ${originalFileName}_${String.format("%02d", successCount)}\n" +
                             "保存位置: Movies/VideoSplitter"
                 } else {
                     tvStatus.text = "⚠️ 分割部分完成\n" +
