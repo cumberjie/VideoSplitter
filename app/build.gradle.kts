@@ -44,8 +44,8 @@ android {
         applicationId = "com.example.videosplitter"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         
         // ========== 新增：只保留 arm64-v8a 架构 ==========
         ndk {
