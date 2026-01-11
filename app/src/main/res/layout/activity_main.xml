@@ -41,15 +41,67 @@
         android:textSize="16sp"
         android:textColor="#333333"/>
 
+    <!-- 可编辑的秒数输入框 -->
     <EditText
         android:id="@+id/etInterval"
-        android:layout_width="150dp"
+        android:layout_width="200dp"
         android:layout_height="wrap_content"
-        android:hint="例如：3"
+        android:hint="点击下方按钮或直接输入"
         android:inputType="number"
         android:textAlignment="center"
+        android:textSize="18sp"
         android:layout_marginTop="8dp"
-        android:layout_marginBottom="24dp"/>
+        android:background="@android:drawable/edit_text"
+        android:padding="12dp"/>
+
+    <!-- 快捷秒数选择按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="24dp">
+
+        <Button
+            android:id="@+id/btn3s"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="3秒"
+            android:textSize="14sp"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn4s"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="4秒"
+            android:textSize="14sp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn5s"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="5秒"
+            android:textSize="14sp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn10s"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="10秒"
+            android:textSize="14sp"
+            android:layout_marginStart="4dp"/>
+
+    </LinearLayout>
 
     <Button
         android:id="@+id/btnSplit"
@@ -59,12 +111,50 @@
         android:textSize="16sp"
         android:enabled="false"/>
 
-    <ProgressBar
-        android:id="@+id/progressBar"
-        android:layout_width="wrap_content"
+    <!-- 美观的进度显示区域 -->
+    <LinearLayout
+        android:id="@+id/progressContainer"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
         android:layout_marginTop="24dp"
-        android:visibility="gone"/>
+        android:visibility="gone"
+        android:padding="16dp"
+        android:background="#F5F5F5">
+
+        <!-- 进度百分比文字 -->
+        <TextView
+            android:id="@+id/tvProgressPercent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="正在分割 0%"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#2196F3"/>
+
+        <!-- 水平进度条 -->
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="8dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@android:drawable/progress_horizontal"/>
+
+        <!-- 进度详情 -->
+        <TextView
+            android:id="@+id/tvProgressDetail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="处理中..."
+            android:textSize="14sp"
+            android:textColor="#666666"/>
+
+    </LinearLayout>
 
     <TextView
         android:id="@+id/tvStatus"
