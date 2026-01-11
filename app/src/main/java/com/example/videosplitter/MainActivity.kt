@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,8 +13,10 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import kotlin.math.ceil
+import kotlin.math.min
 
 class MainActivity : AppCompatActivity() {
 
@@ -37,6 +40,10 @@ class MainActivity : AppCompatActivity() {
     private var originalFileName: String = "video"
     private var videoDurationMs: Long = 0
     private val executor = Executors.newSingleThreadExecutor()
+
+    companion object {
+        private const val TAG = "VideoSplitter"  // 日志标签
+    }
 
     private val videoPickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -84,7 +91,6 @@ class MainActivity : AppCompatActivity() {
           
             originalFileName = fileName.substringBeforeLast(".")
           
-            // 将视频复制到缓存目录（使用不含空格的文件名避免路径问题）
             val inputFile = File(cacheDir, "input_video.mp4")
             contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(inputFile).use { output -> input.copyTo(output) }
@@ -99,6 +105,7 @@ class MainActivity : AppCompatActivity() {
           
         } catch (e: Exception) {
             tvStatus.text = "选择视频失败: ${e.message}"
+            Log.e(TAG, "视频选择失败", e)
         }
     }
 
@@ -121,6 +128,7 @@ class MainActivity : AppCompatActivity() {
             retriever.release()
             duration
         } catch (e: Exception) {
+            Log.e(TAG, "获取视频时长失败", e)
             0L
         }
     }
@@ -167,19 +175,21 @@ class MainActivity : AppCompatActivity() {
         val totalSegments = ceil(durationSec / interval).toInt()
       
         tvStatus.text = "预计生成 $totalSegments 个片段"
+        Log.i(TAG, "开始分割: 总时长=${durationSec}秒, 间隔=${interval}秒, 预计片段=$totalSegments")
 
         executor.execute {
             var successCount = 0
             var failedCount = 0
+            // 收集错误信息，用于最终显示
+            val errorMessages = mutableListOf<String>()
 
             for (i in 0 until totalSegments) {
                 val startTimeSec = i * interval
+                val currentSegment = i + 1
               
-                val segmentNumber = String.format("%02d", i + 1)
+                val segmentNumber = String.format("%02d", currentSegment)
                 val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4").absolutePath
 
-                // ========== 修复：移除转义引号，直接使用路径 ==========
-                // FFmpegKit 内部会正确处理路径，不需要手动添加引号
                 val command = arrayOf(
                     "-ss", startTimeSec.toString(),
                     "-i", selectedVideoPath!!,
@@ -193,25 +203,87 @@ class MainActivity : AppCompatActivity() {
                     "-y", outputFile
                 )
 
-                val currentSegment = i + 1
-                val progress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
-              
-                runOnUiThread {
-                    progressBar.progress = progress
-                    tvProgressPercent.text = "正在分割 $progress%"
-                    tvProgressDetail.text = "处理第 $currentSegment / $totalSegments 段"
+                Log.d(TAG, "开始处理片段 $currentSegment: start=$startTimeSec, output=$outputFile")
+
+                // 使用 CountDownLatch 等待异步任务完成
+                val latch = CountDownLatch(1)
+                var segmentSuccess = false
+                var segmentError: String? = null
+                
+                // 目标时长（毫秒），用于计算编码进度
+                val targetDurationMs = interval * 1000L
+
+                // 使用异步执行，带统计回调实现精确进度
+                FFmpegKit.executeWithArgumentsAsync(
+                    command,
+                    // 完成回调
+                    { session ->
+                        segmentSuccess = ReturnCode.isSuccess(session.returnCode)
+                        
+                        if (!segmentSuccess) {
+                            // ========== 优化1: 捕获详细错误日志 ==========
+                            segmentError = session.allLogsAsString
+                            Log.e(TAG, "片段 $currentSegment 分割失败:")
+                            Log.e(TAG, "返回码: ${session.returnCode}")
+                            Log.e(TAG, "错误详情: $segmentError")
+                        } else {
+                            Log.i(TAG, "片段 $currentSegment 分割成功")
+                        }
+                        
+                        // 释放锁，继续下一个片段
+                        latch.countDown()
+                    },
+                    // 日志回调（用于调试）
+                    { log ->
+                        Log.v(TAG, log.message)
+                    },
+                    // ========== 优化3: 统计回调 - 实时编码进度 ==========
+                    { statistics ->
+                        val timeMs = statistics.time
+                        if (timeMs > 0) {
+                            // 计算当前片段的编码进度百分比
+                            val segmentProgress = min((timeMs.toFloat() / targetDurationMs) * 100, 100f).toInt()
+                            
+                            // 计算总体进度：已完成片段 + 当前片段进度
+                            val overallProgress = (((i.toFloat() + segmentProgress / 100f) / totalSegments) * 100).toInt()
+                            
+                            runOnUiThread {
+                                progressBar.progress = overallProgress
+                                tvProgressPercent.text = "正在分割 $overallProgress%"
+                                tvProgressDetail.text = "片段 $currentSegment/$totalSegments 编码中: $segmentProgress%"
+                            }
+                        }
+                    }
+                )
+
+                // 等待当前片段处理完成
+                try {
+                    latch.await()
+                } catch (e: InterruptedException) {
+                    Log.e(TAG, "等待片段完成时被中断", e)
+                    Thread.currentThread().interrupt()
+                    break
                 }
 
-                // 使用 executeWithArguments 代替 execute，更安全地处理路径
-                val session = FFmpegKit.executeWithArguments(command)
-              
-                if (ReturnCode.isSuccess(session.returnCode)) {
+                // 统计结果
+                if (segmentSuccess) {
                     successCount++
                 } else {
                     failedCount++
+                    // 保存简短错误信息用于UI显示
+                    errorMessages.add("片段$currentSegment: ${extractErrorSummary(segmentError)}")
+                }
+
+                // 更新总进度（片段完成后）
+                val overallProgress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
+                runOnUiThread {
+                    progressBar.progress = overallProgress
+                    tvProgressPercent.text = "正在分割 $overallProgress%"
+                    tvProgressDetail.text = "片段 $currentSegment/$totalSegments 完成"
                 }
             }
 
+            // 分割完成，更新UI
             runOnUiThread {
                 progressBar.progress = 100
                 tvProgressPercent.text = "分割完成 100%"
@@ -231,14 +303,53 @@ class MainActivity : AppCompatActivity() {
                             "每段精准 ${etInterval.text} 秒\n" +
                             "文件命名: ${originalFileName}_01 ~ ${originalFileName}_${String.format("%02d", successCount)}\n" +
                             "保存位置: Movies/VideoSplitter"
+                    Log.i(TAG, "分割全部成功: $successCount 个片段")
                 } else {
+                    // 显示错误摘要
+                    val errorSummary = if (errorMessages.size <= 3) {
+                        errorMessages.joinToString("\n")
+                    } else {
+                        errorMessages.take(3).joinToString("\n") + "\n...等${errorMessages.size}个错误"
+                    }
+                    
                     tvStatus.text = "⚠️ 分割部分完成\n" +
                             "成功: $successCount 个\n" +
                             "失败: $failedCount 个\n" +
-                            "保存位置: Movies/VideoSplitter"
+                            "保存位置: Movies/VideoSplitter\n\n" +
+                            "错误信息:\n$errorSummary"
+                    Log.w(TAG, "分割部分完成: 成功=$successCount, 失败=$failedCount")
                 }
             }
         }
+    }
+
+    /**
+     * 从完整错误日志中提取简短摘要
+     * 用于在UI上显示，避免过长
+     */
+    private fun extractErrorSummary(fullLog: String?): String {
+        if (fullLog.isNullOrEmpty()) return "未知错误"
+        
+        // 尝试查找常见错误关键词
+        val errorPatterns = listOf(
+            "No such file" to "文件不存在",
+            "Permission denied" to "权限被拒绝",
+            "Invalid data" to "无效数据",
+            "Encoder not found" to "编码器未找到",
+            "Out of memory" to "内存不足",
+            "No space left" to "存储空间不足",
+            "Invalid argument" to "参数无效"
+        )
+        
+        for ((pattern, message) in errorPatterns) {
+            if (fullLog.contains(pattern, ignoreCase = true)) {
+                return message
+            }
+        }
+        
+        // 如果没有匹配，返回日志最后一行（通常包含错误信息）
+        val lastLine = fullLog.trim().lines().lastOrNull { it.isNotBlank() }
+        return lastLine?.take(50) ?: "处理失败"
     }
 
     override fun onDestroy() {
