@@ -23,7 +23,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
-import kotlin.math.ceil
 import kotlin.math.min
 
 class MainActivity : AppCompatActivity() {
@@ -52,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "VideoSplitter"
         private const val PERMISSION_REQUEST_CODE = 100
+        // 最后一段的最小时长（秒），小于此值则合并到前一段
+        private const val MIN_LAST_SEGMENT_DURATION = 1.0
     }
 
     private val videoPickerLauncher = registerForActivityResult(
@@ -107,15 +108,10 @@ class MainActivity : AppCompatActivity() {
 
     // ==================== 权限处理 ====================
 
-    /**
-     * 检查是否有存储权限
-     */
     private fun hasStoragePermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ 检查是否有管理所有文件权限
             Environment.isExternalStorageManager()
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Android 6-10 检查写入权限
             ContextCompat.checkSelfPermission(
                 this, Manifest.permission.WRITE_EXTERNAL_STORAGE
             ) == PackageManager.PERMISSION_GRANTED
@@ -124,9 +120,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 检查并请求权限
-     */
     private fun checkAndRequestPermissions() {
         if (hasStoragePermission()) {
             tvStatus.text = "请选择视频文件"
@@ -134,10 +127,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ 需要特殊权限
             showStoragePermissionDialog()
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Android 6-10 请求普通存储权限
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(
@@ -149,9 +140,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 显示存储权限说明对话框（Android 11+）
-     */
     private fun showStoragePermissionDialog() {
         AlertDialog.Builder(this)
             .setTitle("需要存储权限")
@@ -162,7 +150,6 @@ class MainActivity : AppCompatActivity() {
                     intent.data = Uri.parse("package:$packageName")
                     storagePermissionLauncher.launch(intent)
                 } catch (e: Exception) {
-                    // 某些设备可能不支持直接跳转
                     val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
                     storagePermissionLauncher.launch(intent)
                 }
@@ -174,9 +161,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * 权限请求结果回调（Android 6-10）
-     */
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -193,18 +177,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 获取输出目录（根据权限情况选择）
-     */
     private fun getOutputDirectory(): File {
         val outputDir = if (hasStoragePermission()) {
-            // 有权限：保存到公共 Movies 目录
             File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
                 "VideoSplitter"
             )
         } else {
-            // 无权限：保存到应用私有目录（不需要权限）
             File(getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoSplitter")
         }
         
@@ -215,9 +194,6 @@ class MainActivity : AppCompatActivity() {
         return outputDir
     }
 
-    /**
-     * 获取输出目录的显示路径
-     */
     private fun getOutputDisplayPath(): String {
         return if (hasStoragePermission()) {
             "Movies/VideoSplitter"
@@ -284,6 +260,42 @@ class MainActivity : AppCompatActivity() {
         return String.format("%d:%02d", minutes, seconds)
     }
 
+    /**
+     * 计算分段信息
+     * @return Pair<总段数, 每段时长列表>
+     */
+    private fun calculateSegments(durationSec: Double, interval: Int): Pair<Int, List<Double>> {
+        // 计算完整段数（向下取整）
+        val fullSegments = (durationSec / interval).toInt()
+        
+        // 计算剩余时间
+        val remainder = durationSec - (fullSegments * interval)
+        
+        // 决定总段数
+        val totalSegments: Int = when {
+            remainder == 0.0 -> fullSegments                              // 刚好整除
+            remainder >= MIN_LAST_SEGMENT_DURATION -> fullSegments + 1    // 剩余≥1秒，单独成段
+            fullSegments > 0 -> fullSegments                              // 剩余<1秒，合并到前一段
+            else -> 1                                                     // 视频太短，至少1段
+        }
+        
+        // 计算每段的时长
+        val segmentDurations = mutableListOf<Double>()
+        for (i in 0 until totalSegments) {
+            val startTime = i * interval
+            val duration = if (i == totalSegments - 1) {
+                // 最后一段：取剩余所有时间（包含可能合并的部分）
+                durationSec - startTime
+            } else {
+                // 非最后一段：固定时长
+                interval.toDouble()
+            }
+            segmentDurations.add(duration)
+        }
+        
+        return Pair(totalSegments, segmentDurations)
+    }
+
     private fun startSplitting() {
         val intervalText = etInterval.text.toString()
         if (intervalText.isEmpty()) {
@@ -300,7 +312,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 使用权限感知的输出目录
         val outputDir = getOutputDirectory()
         val displayPath = getOutputDisplayPath()
 
@@ -313,11 +324,22 @@ class MainActivity : AppCompatActivity() {
         btnSplit.isEnabled = false
         btnSelectVideo.isEnabled = false
 
+        // ========== 使用智能分段逻辑 ==========
         val durationSec = videoDurationMs / 1000.0
-        val totalSegments = ceil(durationSec / interval).toInt()
+        val (totalSegments, segmentDurations) = calculateSegments(durationSec, interval)
+        
+        // 检查最后一段是否有合并
+        val lastSegmentDuration = segmentDurations.lastOrNull() ?: interval.toDouble()
+        val hasMergedSegment = lastSegmentDuration > interval
       
-        tvStatus.text = "预计生成 $totalSegments 个片段"
+        tvStatus.text = if (hasMergedSegment) {
+            "预计生成 $totalSegments 个片段\n(最后一段包含不足1秒的尾部)"
+        } else {
+            "预计生成 $totalSegments 个片段"
+        }
+        
         Log.i(TAG, "开始分割: 总时长=${durationSec}秒, 间隔=${interval}秒, 预计片段=$totalSegments")
+        Log.i(TAG, "各段时长: $segmentDurations")
         Log.i(TAG, "输出目录: ${outputDir.absolutePath}")
 
         executor.execute {
@@ -328,14 +350,18 @@ class MainActivity : AppCompatActivity() {
             for (i in 0 until totalSegments) {
                 val startTimeSec = i * interval
                 val currentSegment = i + 1
+                
+                // 获取当前段的实际时长
+                val segmentDuration = segmentDurations[i]
               
                 val segmentNumber = String.format("%02d", currentSegment)
                 val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4").absolutePath
 
+                // 使用精确的时长参数
                 val command = arrayOf(
                     "-ss", startTimeSec.toString(),
                     "-i", selectedVideoPath!!,
-                    "-t", interval.toString(),
+                    "-t", segmentDuration.toString(),  // 使用计算出的精确时长
                     "-c:v", "libx264",
                     "-crf", "18",
                     "-preset", "fast",
@@ -345,12 +371,12 @@ class MainActivity : AppCompatActivity() {
                     "-y", outputFile
                 )
 
-                Log.d(TAG, "开始处理片段 $currentSegment: start=$startTimeSec, output=$outputFile")
+                Log.d(TAG, "开始处理片段 $currentSegment: start=$startTimeSec, duration=$segmentDuration, output=$outputFile")
 
                 val latch = CountDownLatch(1)
                 var segmentSuccess = false
                 var segmentError: String? = null
-                val targetDurationMs = interval * 1000L
+                val targetDurationMs = (segmentDuration * 1000).toLong()
 
                 FFmpegKit.executeWithArgumentsAsync(
                     command,
@@ -363,7 +389,7 @@ class MainActivity : AppCompatActivity() {
                             Log.e(TAG, "返回码: ${session.returnCode}")
                             Log.e(TAG, "错误详情: $segmentError")
                         } else {
-                            Log.i(TAG, "片段 $currentSegment 分割成功")
+                            Log.i(TAG, "片段 $currentSegment 分割成功 (时长: ${String.format("%.1f", segmentDuration)}秒)")
                         }
                         
                         latch.countDown()
@@ -423,9 +449,19 @@ class MainActivity : AppCompatActivity() {
                 btnSelectVideo.isEnabled = true
 
                 if (failedCount == 0) {
+                    // 构建时长说明
+                    val durationInfo = if (hasMergedSegment && successCount > 1) {
+                        "前 ${successCount - 1} 段: 每段 $interval 秒\n" +
+                        "最后 1 段: ${String.format("%.1f", lastSegmentDuration)} 秒"
+                    } else if (successCount == 1) {
+                        "时长: ${String.format("%.1f", lastSegmentDuration)} 秒"
+                    } else {
+                        "每段 $interval 秒"
+                    }
+                    
                     tvStatus.text = "✅ 分割完成！\n" +
                             "生成了 $successCount 个视频片段\n" +
-                            "每段精准 ${etInterval.text} 秒\n" +
+                            "$durationInfo\n" +
                             "文件命名: ${originalFileName}_01 ~ ${originalFileName}_${String.format("%02d", successCount)}\n" +
                             "保存位置: $displayPath"
                     Log.i(TAG, "分割全部成功: $successCount 个片段")
