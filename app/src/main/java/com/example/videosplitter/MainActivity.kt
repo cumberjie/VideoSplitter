@@ -3,6 +3,7 @@ package com.example.videosplitter
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -501,6 +502,13 @@ class MainActivity : AppCompatActivity() {
 
                 if (segmentSuccess) {
                     successCount++
+                    // 【新增】立即通知相册刷新，让视频马上出现
+                    MediaScannerConnection.scanFile(
+                        this@MainActivity,
+                        arrayOf(outputFile),
+                        arrayOf("video/mp4"),
+                        null
+                    )
                 } else {
                     failedCount++
                     errorMessages.add("片段$currentSegment: ${extractErrorSummary(segmentError)}")
