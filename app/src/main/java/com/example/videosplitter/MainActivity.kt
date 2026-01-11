@@ -47,11 +47,13 @@ class MainActivity : AppCompatActivity() {
     private var originalFileName: String = "video"
     private var videoDurationMs: Long = 0
     private val executor = Executors.newSingleThreadExecutor()
+    
+    // 【修复5】用于检查 Activity 是否已销毁
+    private var isActivityDestroyed = false
 
     companion object {
         private const val TAG = "VideoSplitter"
         private const val PERMISSION_REQUEST_CODE = 100
-        // 最后一段的最小时长（秒），小于此值则合并到前一段
         private const val MIN_LAST_SEGMENT_DURATION = 1.0
     }
 
@@ -61,7 +63,6 @@ class MainActivity : AppCompatActivity() {
         uri?.let { handleVideoSelection(it) }
     }
 
-    // Android 11+ 存储管理权限请求
     private val storagePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -210,6 +211,9 @@ class MainActivity : AppCompatActivity() {
             tvSelectedVideo.text = "已选择: $fileName"
           
             originalFileName = fileName.substringBeforeLast(".")
+            
+            // 【修复2】清理旧的缓存文件
+            cleanupCacheFiles()
           
             val inputFile = File(cacheDir, "input_video.mp4")
             contentResolver.openInputStream(uri)?.use { input ->
@@ -228,6 +232,21 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "视频选择失败", e)
         }
     }
+    
+    /**
+     * 【修复2】清理缓存文件
+     */
+    private fun cleanupCacheFiles() {
+        try {
+            val cacheFile = File(cacheDir, "input_video.mp4")
+            if (cacheFile.exists()) {
+                cacheFile.delete()
+                Log.d(TAG, "已清理缓存文件: ${cacheFile.name}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "清理缓存文件失败", e)
+        }
+    }
 
     private fun getFileName(uri: Uri): String {
         var name = "未知文件"
@@ -238,18 +257,26 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
+    /**
+     * 【修复3】使用 try-finally 确保 MediaMetadataRetriever 释放
+     */
     private fun getVideoDuration(path: String): Long {
+        val retriever = android.media.MediaMetadataRetriever()
         return try {
-            val retriever = android.media.MediaMetadataRetriever()
             retriever.setDataSource(path)
-            val duration = retriever.extractMetadata(
+            retriever.extractMetadata(
                 android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
-            retriever.release()
-            duration
         } catch (e: Exception) {
             Log.e(TAG, "获取视频时长失败", e)
             0L
+        } finally {
+            // 确保释放资源，避免内存泄漏
+            try {
+                retriever.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "释放 MediaMetadataRetriever 失败", e)
+            }
         }
     }
 
@@ -260,40 +287,54 @@ class MainActivity : AppCompatActivity() {
         return String.format("%d:%02d", minutes, seconds)
     }
 
-    /**
-     * 计算分段信息
-     * @return Pair<总段数, 每段时长列表>
-     */
     private fun calculateSegments(durationSec: Double, interval: Int): Pair<Int, List<Double>> {
-        // 计算完整段数（向下取整）
         val fullSegments = (durationSec / interval).toInt()
-        
-        // 计算剩余时间
         val remainder = durationSec - (fullSegments * interval)
         
-        // 决定总段数
         val totalSegments: Int = when {
-            remainder == 0.0 -> fullSegments                              // 刚好整除
-            remainder >= MIN_LAST_SEGMENT_DURATION -> fullSegments + 1    // 剩余≥1秒，单独成段
-            fullSegments > 0 -> fullSegments                              // 剩余<1秒，合并到前一段
-            else -> 1                                                     // 视频太短，至少1段
+            remainder == 0.0 -> fullSegments
+            remainder >= MIN_LAST_SEGMENT_DURATION -> fullSegments + 1
+            fullSegments > 0 -> fullSegments
+            else -> 1
         }
         
-        // 计算每段的时长
         val segmentDurations = mutableListOf<Double>()
         for (i in 0 until totalSegments) {
             val startTime = i * interval
             val duration = if (i == totalSegments - 1) {
-                // 最后一段：取剩余所有时间（包含可能合并的部分）
                 durationSec - startTime
             } else {
-                // 非最后一段：固定时长
                 interval.toDouble()
             }
             segmentDurations.add(duration)
         }
         
         return Pair(totalSegments, segmentDurations)
+    }
+    
+    /**
+     * 【修复5】安全的 UI 更新方法，避免 Activity 销毁后崩溃
+     */
+    private fun safeRunOnUiThread(action: () -> Unit) {
+        if (!isActivityDestroyed && !isFinishing) {
+            runOnUiThread(action)
+        }
+    }
+    
+    /**
+     * 【修复9】检查输出文件是否已存在
+     * @return 已存在的文件列表
+     */
+    private fun checkExistingFiles(outputDir: File, totalSegments: Int): List<String> {
+        val existingFiles = mutableListOf<String>()
+        for (i in 1..totalSegments) {
+            val segmentNumber = String.format("%02d", i)
+            val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4")
+            if (outputFile.exists()) {
+                existingFiles.add(outputFile.name)
+            }
+        }
+        return existingFiles
     }
 
     private fun startSplitting() {
@@ -311,9 +352,54 @@ class MainActivity : AppCompatActivity() {
             tvStatus.text = "请先选择视频"
             return
         }
+        
+        // 【修复8】验证间隔不超过视频时长
+        val durationSec = videoDurationMs / 1000.0
+        if (interval > durationSec) {
+            tvStatus.text = "⚠️ 分割间隔 (${interval}秒) 超过视频时长 (${String.format("%.1f", durationSec)}秒)\n请输入较小的值"
+            return
+        }
 
         val outputDir = getOutputDirectory()
         val displayPath = getOutputDisplayPath()
+        
+        // 预先计算分段信息
+        val (totalSegments, segmentDurations) = calculateSegments(durationSec, interval)
+        
+        // 【修复9】检查是否有文件会被覆盖
+        val existingFiles = checkExistingFiles(outputDir, totalSegments)
+        if (existingFiles.isNotEmpty()) {
+            val fileList = if (existingFiles.size <= 3) {
+                existingFiles.joinToString("\n")
+            } else {
+                existingFiles.take(3).joinToString("\n") + "\n...等 ${existingFiles.size} 个文件"
+            }
+            
+            AlertDialog.Builder(this)
+                .setTitle("文件已存在")
+                .setMessage("以下文件将被覆盖：\n\n$fileList\n\n是否继续？")
+                .setPositiveButton("覆盖") { _, _ ->
+                    doStartSplitting(interval, outputDir, displayPath, totalSegments, segmentDurations)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            return
+        }
+        
+        doStartSplitting(interval, outputDir, displayPath, totalSegments, segmentDurations)
+    }
+    
+    /**
+     * 执行实际的分割操作
+     */
+    private fun doStartSplitting(
+        interval: Int,
+        outputDir: File,
+        displayPath: String,
+        totalSegments: Int,
+        segmentDurations: List<Double>
+    ) {
+        val durationSec = videoDurationMs / 1000.0
 
         progressContainer.visibility = View.VISIBLE
         spinnerProgress.visibility = View.VISIBLE
@@ -323,12 +409,7 @@ class MainActivity : AppCompatActivity() {
         tvProgressDetail.text = "准备中..."
         btnSplit.isEnabled = false
         btnSelectVideo.isEnabled = false
-
-        // ========== 使用智能分段逻辑 ==========
-        val durationSec = videoDurationMs / 1000.0
-        val (totalSegments, segmentDurations) = calculateSegments(durationSec, interval)
         
-        // 检查最后一段是否有合并
         val lastSegmentDuration = segmentDurations.lastOrNull() ?: interval.toDouble()
         val hasMergedSegment = lastSegmentDuration > interval
       
@@ -350,18 +431,15 @@ class MainActivity : AppCompatActivity() {
             for (i in 0 until totalSegments) {
                 val startTimeSec = i * interval
                 val currentSegment = i + 1
-                
-                // 获取当前段的实际时长
                 val segmentDuration = segmentDurations[i]
               
                 val segmentNumber = String.format("%02d", currentSegment)
                 val outputFile = File(outputDir, "${originalFileName}_${segmentNumber}.mp4").absolutePath
 
-                // 使用精确的时长参数
                 val command = arrayOf(
                     "-ss", startTimeSec.toString(),
                     "-i", selectedVideoPath!!,
-                    "-t", segmentDuration.toString(),  // 使用计算出的精确时长
+                    "-t", segmentDuration.toString(),
                     "-c:v", "libx264",
                     "-crf", "18",
                     "-preset", "fast",
@@ -403,7 +481,8 @@ class MainActivity : AppCompatActivity() {
                             val segmentProgress = min((timeMs.toFloat() / targetDurationMs) * 100, 100f).toInt()
                             val overallProgress = (((i.toFloat() + segmentProgress / 100f) / totalSegments) * 100).toInt()
                             
-                            runOnUiThread {
+                            // 【修复5】使用安全的 UI 更新
+                            safeRunOnUiThread {
                                 progressBar.progress = overallProgress
                                 tvProgressPercent.text = "正在分割 $overallProgress%"
                                 tvProgressDetail.text = "片段 $currentSegment/$totalSegments 编码中: $segmentProgress%"
@@ -428,28 +507,35 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val overallProgress = ((currentSegment.toFloat() / totalSegments) * 100).toInt()
-                runOnUiThread {
+                // 【修复5】使用安全的 UI 更新
+                safeRunOnUiThread {
                     progressBar.progress = overallProgress
                     tvProgressPercent.text = "正在分割 $overallProgress%"
                     tvProgressDetail.text = "片段 $currentSegment/$totalSegments 完成"
                 }
             }
+            
+            // 【修复2】分割完成后清理缓存
+            cleanupCacheFiles()
 
-            runOnUiThread {
+            // 【修复5】使用安全的 UI 更新
+            safeRunOnUiThread {
                 progressBar.progress = 100
                 tvProgressPercent.text = "分割完成 100%"
                 tvProgressDetail.text = "处理完毕"
                 spinnerProgress.visibility = View.GONE
               
                 progressContainer.postDelayed({
-                    progressContainer.visibility = View.GONE
+                    // 【修复5】延迟回调也需要检查
+                    if (!isActivityDestroyed && !isFinishing) {
+                        progressContainer.visibility = View.GONE
+                    }
                 }, 2000)
               
                 btnSplit.isEnabled = true
                 btnSelectVideo.isEnabled = true
 
                 if (failedCount == 0) {
-                    // 构建时长说明
                     val durationInfo = if (hasMergedSegment && successCount > 1) {
                         "前 ${successCount - 1} 段: 每段 $interval 秒\n" +
                         "最后 1 段: ${String.format("%.1f", lastSegmentDuration)} 秒"
@@ -508,6 +594,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 【修复5】标记 Activity 已销毁
+        isActivityDestroyed = true
         executor.shutdown()
+        // 【修复2】退出时清理缓存
+        cleanupCacheFiles()
     }
 }
