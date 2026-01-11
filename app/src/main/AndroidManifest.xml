@@ -25,7 +25,12 @@
         android:requestLegacyExternalStorage="true"
         tools:targetApi="31">
 
-        <activity android:name=".MainActivity" android:exported="true">
+        <!-- 【修改】添加屏幕方向锁定，防止旋转时丢失进度 -->
+        <activity 
+            android:name=".MainActivity" 
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
