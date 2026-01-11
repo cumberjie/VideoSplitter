@@ -13,7 +13,7 @@
         android:text="视频定时分割器"
         android:textSize="24sp"
         android:textStyle="bold"
-        android:textColor="#333333"
+        android:textColor="#6750A4"
         android:layout_marginTop="32dp"
         android:layout_marginBottom="32dp"/>
 
@@ -22,7 +22,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="📁 选择视频"
-        android:textSize="16sp"/>
+        android:textSize="16sp"
+        android:backgroundTint="#6750A4"/>
 
     <TextView
         android:id="@+id/tvSelectedVideo"
@@ -39,22 +40,22 @@
         android:layout_height="wrap_content"
         android:text="分割间隔（秒）："
         android:textSize="16sp"
-        android:textColor="#333333"/>
+        android:textColor="#6750A4"/>
 
     <!-- 可编辑的秒数输入框 -->
     <EditText
         android:id="@+id/etInterval"
         android:layout_width="200dp"
         android:layout_height="wrap_content"
-        android:hint="点击下方按钮或直接输入"
+        android:hint="点击下方或直接输入"
         android:inputType="number"
         android:textAlignment="center"
         android:textSize="18sp"
         android:layout_marginTop="8dp"
-        android:background="@android:drawable/edit_text"
-        android:padding="12dp"/>
+        android:padding="12dp"
+        android:background="@drawable/edit_text_border"/>
 
-    <!-- 快捷秒数选择按钮 -->
+    <!-- 快捷秒数选择按钮 - 只有3个 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -70,7 +71,8 @@
             android:layout_weight="1"
             android:text="3秒"
             android:textSize="14sp"
-            android:layout_marginEnd="4dp"/>
+            android:layout_marginEnd="8dp"
+            android:backgroundTint="#6750A4"/>
 
         <Button
             android:id="@+id/btn4s"
@@ -79,8 +81,9 @@
             android:layout_weight="1"
             android:text="4秒"
             android:textSize="14sp"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:backgroundTint="#6750A4"/>
 
         <Button
             android:id="@+id/btn5s"
@@ -89,17 +92,8 @@
             android:layout_weight="1"
             android:text="5秒"
             android:textSize="14sp"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"/>
-
-        <Button
-            android:id="@+id/btn10s"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="10秒"
-            android:textSize="14sp"
-            android:layout_marginStart="4dp"/>
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#6750A4"/>
 
     </LinearLayout>
 
@@ -109,7 +103,8 @@
         android:layout_height="wrap_content"
         android:text="✂️ 开始分割"
         android:textSize="16sp"
-        android:enabled="false"/>
+        android:enabled="false"
+        android:backgroundTint="#6750A4"/>
 
     <!-- 美观的进度显示区域 -->
     <LinearLayout
@@ -121,17 +116,33 @@
         android:layout_marginTop="24dp"
         android:visibility="gone"
         android:padding="16dp"
-        android:background="#F5F5F5">
+        android:background="@drawable/progress_bg">
 
-        <!-- 进度百分比文字 -->
-        <TextView
-            android:id="@+id/tvProgressPercent"
+        <!-- 旋转图标 + 进度百分比 -->
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="正在分割 0%"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:textColor="#2196F3"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- 动态旋转的加载图标 -->
+            <ProgressBar
+                android:id="@+id/spinnerProgress"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginEnd="8dp"
+                android:indeterminateTint="#6750A4"/>
+
+            <TextView
+                android:id="@+id/tvProgressPercent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="正在分割 0%"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#6750A4"/>
+
+        </LinearLayout>
 
         <!-- 水平进度条 -->
         <ProgressBar
@@ -143,7 +154,8 @@
             android:layout_marginBottom="8dp"
             android:max="100"
             android:progress="0"
-            android:progressDrawable="@android:drawable/progress_horizontal"/>
+            android:progressTint="#6750A4"
+            android:progressBackgroundTint="#E0E0E0"/>
 
         <!-- 进度详情 -->
         <TextView
