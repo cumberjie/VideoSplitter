@@ -17,7 +17,7 @@
         android:layout_marginTop="32dp"
         android:layout_marginBottom="16dp"/>
 
-    <!-- ========== 新增：编码器信息卡片 ========== -->
+    <!-- 编码器信息卡片 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -43,8 +43,16 @@
             android:textSize="14sp"
             android:checked="true"/>
 
+        <Switch
+            android:id="@+id/switchParallel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="⚡ 并行处理（更快但更耗电）"
+            android:textSize="14sp"
+            android:checked="false"/>
+
     </LinearLayout>
-    <!-- ========== 新增结束 ========== -->
 
     <Button
         android:id="@+id/btnSelectVideo"
@@ -133,7 +141,6 @@
         android:enabled="false"
         android:backgroundTint="#6750A4"/>
 
-    <!-- ========== 新增：取消按钮 ========== -->
     <Button
         android:id="@+id/btnCancel"
         android:layout_width="match_parent"
@@ -143,7 +150,6 @@
         android:textSize="16sp"
         android:visibility="gone"
         android:backgroundTint="#F44336"/>
-    <!-- ========== 新增结束 ========== -->
 
     <LinearLayout
         android:id="@+id/progressContainer"
