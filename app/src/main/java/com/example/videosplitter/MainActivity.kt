@@ -28,26 +28,27 @@ import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
+    // ==================== UI 组件 ====================
     private lateinit var btnSelectVideo: Button
     private lateinit var btnSplit: Button
-    private lateinit var btnCancel: Button  // 新增：取消按钮
+    private lateinit var btnCancel: Button
     private lateinit var tvSelectedVideo: TextView
     private lateinit var tvStatus: TextView
-    private lateinit var tvEncoderInfo: TextView  // 新增：编码器信息
+    private lateinit var tvEncoderInfo: TextView
     private lateinit var etInterval: EditText
     private lateinit var progressBar: ProgressBar
     private lateinit var progressContainer: LinearLayout
     private lateinit var tvProgressPercent: TextView
     private lateinit var tvProgressDetail: TextView
     private lateinit var spinnerProgress: ProgressBar
-    private lateinit var switchHardwareEncoder: Switch  // 新增：硬件加速开关
-    private lateinit var switchParallel: Switch  // 新增：并行处理开关
+    private lateinit var switchHardwareEncoder: Switch
+    private lateinit var switchParallel: Switch
   
     private lateinit var btn3s: Button
     private lateinit var btn4s: Button
     private lateinit var btn5s: Button
   
-    // 视频信息
+    // ==================== 数据 ====================
     private var selectedVideoPath: String? = null
     private var originalFileName: String = "video"
     private var videoInfo: VideoUtils.VideoInfo? = null
@@ -55,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     // 智能分割器
     private lateinit var videoSplitter: SmartVideoSplitter
     
-    // 当前分割任务（用于取消）
+    // 当前分割任务
     private var splitJob: Job? = null
 
     companion object {
@@ -63,6 +64,7 @@ class MainActivity : AppCompatActivity() {
         private const val PERMISSION_REQUEST_CODE = 100
     }
 
+    // ==================== Activity Result Launchers ====================
     private val videoPickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -79,6 +81,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ==================== 生命周期 ====================
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -89,9 +92,16 @@ class MainActivity : AppCompatActivity() {
         initViews()
         setupClickListeners()
         checkAndRequestPermissions()
-        displayDeviceCapabilities()
+        detectHardwareEncoder()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        splitJob?.cancel()
+        VideoUtils.cleanupCache(this)
+    }
+
+    // ==================== 初始化 ====================
     private fun initViews() {
         btnSelectVideo = findViewById(R.id.btnSelectVideo)
         btnSplit = findViewById(R.id.btnSplit)
@@ -111,57 +121,37 @@ class MainActivity : AppCompatActivity() {
         btn3s = findViewById(R.id.btn3s)
         btn4s = findViewById(R.id.btn4s)
         btn5s = findViewById(R.id.btn5s)
-        
-        // 初始状态
-        btnCancel.visibility = View.GONE
-        progressContainer.visibility = View.GONE
     }
 
     private fun setupClickListeners() {
-        btnSelectVideo.setOnClickListener { 
-            videoPickerLauncher.launch("video/*") 
-        }
+        btnSelectVideo.setOnClickListener { videoPickerLauncher.launch("video/*") }
+        btnSplit.setOnClickListener { startSplitting() }
+        btnCancel.setOnClickListener { cancelSplitting() }
+      
+        btn3s.setOnClickListener { etInterval.setText("3") }
+        btn4s.setOnClickListener { etInterval.setText("4") }
+        btn5s.setOnClickListener { etInterval.setText("5") }
         
-        btnSplit.setOnClickListener { 
-            startSplitting() 
-        }
-        
-        btnCancel.setOnClickListener {
-            cancelSplitting()
-        }
-        
-        // 快捷秒数按钮
-        listOf(btn3s to 3, btn4s to 4, btn5s to 5).forEach { (btn, seconds) ->
-            btn.setOnClickListener { etInterval.setText(seconds.toString()) }
-        }
-        
-        // 硬件加速开关
         switchHardwareEncoder.setOnCheckedChangeListener { _, isChecked ->
             updateEncoderInfo()
-            // 如果关闭硬件加速，也关闭并行处理
             if (!isChecked) {
                 switchParallel.isChecked = false
             }
         }
         
-        // 并行处理开关
         switchParallel.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 Toast.makeText(this, "⚡ 并行模式：速度更快，但可能导致手机发热", Toast.LENGTH_SHORT).show()
             }
         }
     }
-    
-    /**
-     * 显示设备编码能力
-     */
-    private fun displayDeviceCapabilities() {
+
+    // ==================== 硬件编码器检测 ====================
+    private fun detectHardwareEncoder() {
         val caps = HardwareCodecDetector.detectCapabilities()
         
         switchHardwareEncoder.isEnabled = caps.supportsH264
         switchHardwareEncoder.isChecked = caps.supportsH264
-        
-        // 如果不支持硬件编码，禁用并行处理
         switchParallel.isEnabled = caps.supportsH264
         
         updateEncoderInfo()
@@ -171,9 +161,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    /**
-     * 更新编码器信息显示
-     */
     private fun updateEncoderInfo() {
         val useHardware = switchHardwareEncoder.isChecked
         val config = EncoderConfigFactory.getBestConfig(
@@ -191,8 +178,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ==================== 权限处理（保持不变）====================
-    
+    // ==================== 权限处理 ====================
     private fun hasStoragePermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -228,7 +214,7 @@ class MainActivity : AppCompatActivity() {
     private fun showStoragePermissionDialog() {
         AlertDialog.Builder(this)
             .setTitle("需要存储权限")
-            .setMessage("为了将分割后的视频保存到 Movies 文件夹，需要授予\"所有文件访问\"权限。")
+            .setMessage("为了将分割后的视频保存到 Movies 文件夹，需要授予\"所有文件访问\"权限。\n\n点击\"去设置\"后，请开启\"允许访问所有文件\"选项。")
             .setPositiveButton("去设置") { _, _ ->
                 try {
                     val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
@@ -252,6 +238,7 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
                 tvStatus.text = "权限已获取，请选择视频"
@@ -261,6 +248,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ==================== 文件路径处理 ====================
     private fun getOutputDirectory(): File {
         val outputDir = if (hasStoragePermission()) {
             File(
@@ -286,8 +274,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ==================== 视频处理 ====================
-
+    // ==================== 视频选择处理 ====================
     private fun handleVideoSelection(uri: Uri) {
         try {
             val fileName = getFileName(uri)
@@ -343,9 +330,7 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
-    /**
-     * 开始分割
-     */
+    // ==================== 分割功能 ====================
     private fun startSplitting() {
         // 参数验证
         val intervalText = etInterval.text.toString()
@@ -372,7 +357,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
-        // 验证间隔不超过视频时长
         if (interval > info.durationSeconds) {
             tvStatus.text = "⚠️ 分割间隔超过视频时长"
             return
@@ -394,18 +378,22 @@ class MainActivity : AppCompatActivity() {
         // 更新 UI 状态
         setProcessingState(true)
         
+        val encoderInfo = if (switchHardwareEncoder.isChecked) "🚀 硬件加速" else "💻 软件编码"
+        val parallelInfo = if (switchParallel.isChecked) " | ⚡ 并行" else ""
+        tvStatus.text = "开始分割...\n$encoderInfo$parallelInfo"
+        
         // 启动分割任务
         splitJob = lifecycleScope.launch {
             try {
                 val result = videoSplitter.split(config) { progress ->
-                    // 更新进度（已在主线程）
+                    // 更新进度
                     progressBar.progress = progress.overallProgress
                     tvProgressPercent.text = "正在分割 ${progress.overallProgress}%"
                     tvProgressDetail.text = progress.status
                 }
                 
                 // 显示结果
-                showResult(result, config)
+                showResult(result)
                 
             } catch (e: kotlinx.coroutines.CancellationException) {
                 tvStatus.text = "❌ 已取消分割"
@@ -418,17 +406,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    /**
-     * 取消分割
-     */
     private fun cancelSplitting() {
         splitJob?.cancel()
         tvStatus.text = "正在取消..."
     }
     
-    /**
-     * 设置处理状态
-     */
     private fun setProcessingState(isProcessing: Boolean) {
         btnSplit.isEnabled = !isProcessing
         btnSelectVideo.isEnabled = !isProcessing
@@ -446,17 +428,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    /**
-     * 显示分割结果
-     */
-    private fun showResult(result: SmartVideoSplitter.SplitResult, config: SmartVideoSplitter.SplitConfig) {
+    private fun showResult(result: SmartVideoSplitter.SplitResult) {
         val displayPath = getOutputDisplayPath()
         val durationSec = result.totalDurationMs / 1000.0
         
         val encoderInfo = if (result.usedHardwareAcceleration) {
-            "🚀 使用硬件加速"
+            "🚀 硬件加速"
         } else {
-            "💻 使用软件编码"
+            "💻 软件编码"
         }
         
         if (result.success) {
@@ -475,15 +454,17 @@ class MainActivity : AppCompatActivity() {
                 result.errorMessage?.let {
                     appendLine("\n错误: $it")
                 }
-                            }
+            }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        // 取消正在进行的任务
-        splitJob?.cancel()
-        // 清理缓存
-        VideoUtils.cleanupCache(this)
+        
+        progressBar.progress = 100
+        tvProgressPercent.text = "分割完成 100%"
+        spinnerProgress.visibility = View.GONE
+        
+        progressContainer.postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                progressContainer.visibility = View.GONE
+            }
+        }, 2000)
     }
 }
