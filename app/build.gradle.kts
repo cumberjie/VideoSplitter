@@ -29,7 +29,6 @@ val downloadFfmpegAar by tasks.registering {
     }
 }
 
-// 确保在编译前先下载 AAR
 tasks.named("preBuild") {
     dependsOn(downloadFfmpegAar)
 }
@@ -38,7 +37,6 @@ android {
     namespace = "com.example.videosplitter"
     compileSdk = 34
 
-    // ========== 新增：签名配置 ==========
     signingConfigs {
         create("release") {
             val keystoreFile = System.getenv("KEYSTORE_FILE")
@@ -55,8 +53,8 @@ android {
         applicationId = "com.example.videosplitter"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.3"
+        versionCode = 4  // 版本号 +1
+        versionName = "1.4"  // 添加硬件加速版本
         
         ndk {
             abiFilters += "arm64-v8a"
@@ -66,7 +64,6 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            // ========== 新增：使用签名 ==========
             signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -88,6 +85,9 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     
     implementation(files("libs/ffmpeg-kit-min-gpl-7.1.5.aar"))
-    
     implementation("com.arthenica:smart-exception-java:0.2.1")
+    
+    // ========== 新增：协程支持 ==========
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 }
