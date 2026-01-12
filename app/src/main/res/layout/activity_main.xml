@@ -15,7 +15,36 @@
         android:textStyle="bold"
         android:textColor="#6750A4"
         android:layout_marginTop="32dp"
-        android:layout_marginBottom="32dp"/>
+        android:layout_marginBottom="16dp"/>
+
+    <!-- ========== 新增：编码器信息卡片 ========== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/progress_bg">
+
+        <TextView
+            android:id="@+id/tvEncoderInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="检测编码能力中..."
+            android:textSize="13sp"
+            android:textColor="#666666"/>
+
+        <Switch
+            android:id="@+id/switchHardwareEncoder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="🚀 启用硬件加速"
+            android:textSize="14sp"
+            android:checked="true"/>
+
+    </LinearLayout>
+    <!-- ========== 新增结束 ========== -->
 
     <Button
         android:id="@+id/btnSelectVideo"
@@ -42,7 +71,6 @@
         android:textSize="16sp"
         android:textColor="#6750A4"/>
 
-    <!-- 可编辑的秒数输入框 -->
     <EditText
         android:id="@+id/etInterval"
         android:layout_width="200dp"
@@ -55,7 +83,6 @@
         android:padding="12dp"
         android:background="@drawable/edit_text_border"/>
 
-    <!-- 快捷秒数选择按钮 - 只有3个 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -106,7 +133,18 @@
         android:enabled="false"
         android:backgroundTint="#6750A4"/>
 
-    <!-- 美观的进度显示区域 -->
+    <!-- ========== 新增：取消按钮 ========== -->
+    <Button
+        android:id="@+id/btnCancel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="❌ 取消"
+        android:textSize="16sp"
+        android:visibility="gone"
+        android:backgroundTint="#F44336"/>
+    <!-- ========== 新增结束 ========== -->
+
     <LinearLayout
         android:id="@+id/progressContainer"
         android:layout_width="match_parent"
@@ -118,14 +156,12 @@
         android:padding="16dp"
         android:background="@drawable/progress_bg">
 
-        <!-- 旋转图标 + 进度百分比 -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
-            <!-- 动态旋转的加载图标 -->
             <ProgressBar
                 android:id="@+id/spinnerProgress"
                 android:layout_width="24dp"
@@ -144,7 +180,6 @@
 
         </LinearLayout>
 
-        <!-- 水平进度条 -->
         <ProgressBar
             android:id="@+id/progressBar"
             style="@android:style/Widget.ProgressBar.Horizontal"
@@ -157,7 +192,6 @@
             android:progressTint="#6750A4"
             android:progressBackgroundTint="#E0E0E0"/>
 
-        <!-- 进度详情 -->
         <TextView
             android:id="@+id/tvProgressDetail"
             android:layout_width="wrap_content"
