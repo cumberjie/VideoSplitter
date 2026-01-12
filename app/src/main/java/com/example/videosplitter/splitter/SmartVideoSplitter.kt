@@ -64,8 +64,8 @@ class SmartVideoSplitter(
     data class Progress(
         val currentSegment: Int,
         val totalSegments: Int,
-        val segmentProgress: Int,      // 当前片段进度 0-100
-        val overallProgress: Int,      // 总体进度 0-100
+        val segmentProgress: Int,
+        val overallProgress: Int,
         val status: String
     )
     
@@ -81,8 +81,17 @@ class SmartVideoSplitter(
         val videoWidth: Int,
         val videoHeight: Int,
         val useHardwareEncoder: Boolean = true,
-        val enableParallel: Boolean = false,    // 是否启用并行处理
+        val enableParallel: Boolean = false,
         val qualityPreset: EncoderConfigFactory.QualityPreset = EncoderConfigFactory.QualityPreset.BALANCED
+    )
+    
+    /**
+     * 片段信息
+     */
+    private data class SegmentInfo(
+        val index: Int,
+        val startTimeSec: Double,
+        val durationSec: Double
     )
     
     /**
@@ -113,17 +122,12 @@ class SmartVideoSplitter(
         Log.i(TAG, "使用编码器: ${currentConfig!!.description}")
         
         // 计算分段信息
-        val segments = calculateSegments(
-            durationMs = config.videoDurationMs,
-            intervalSeconds = config.intervalSeconds
-        )
-                // 计算分段信息
-        val segments = calculateSegments(
+        val segmentList = calculateSegments(
             durationMs = config.videoDurationMs,
             intervalSeconds = config.intervalSeconds
         )
         
-        Log.i(TAG, "预计生成 ${segments.size} 个片段")
+        Log.i(TAG, "预计生成 ${segmentList.size} 个片段")
         
         // 确保输出目录存在
         if (!config.outputDir.exists()) {
@@ -131,10 +135,10 @@ class SmartVideoSplitter(
         }
         
         // 执行分割
-        val results = if (config.enableParallel && segments.size > 1) {
-            splitParallel(config, segments, onProgress)
+        val results = if (config.enableParallel && segmentList.size > 1) {
+            splitParallel(config, segmentList, onProgress)
         } else {
-            splitSequential(config, segments, onProgress)
+            splitSequential(config, segmentList, onProgress)
         }
         
         // 统计结果
@@ -170,28 +174,28 @@ class SmartVideoSplitter(
     }
     
     /**
-     * 顺序分割（一个接一个）
+     * 顺序分割
      */
     private suspend fun splitSequential(
         config: SplitConfig,
-        segments: List<SegmentInfo>,
+        segmentList: List<SegmentInfo>,
         onProgress: (Progress) -> Unit
-    ): List<SegmentResult> {
+    ): List<SegmentResult> = coroutineScope {
         
         val results = mutableListOf<SegmentResult>()
         
-        for ((index, segment) in segments.withIndex()) {
+        for ((index, segment) in segmentList.withIndex()) {
             // 检查是否取消
-            ensureActive()
+            if (!isActive) break
             
             // 更新进度
             withContext(Dispatchers.Main) {
                 onProgress(Progress(
                     currentSegment = index + 1,
-                    totalSegments = segments.size,
+                    totalSegments = segmentList.size,
                     segmentProgress = 0,
-                    overallProgress = (index * 100) / segments.size,
-                    status = "正在处理片段 ${index + 1}/${segments.size}"
+                    overallProgress = (index * 100) / segmentList.size,
+                    status = "正在处理片段 ${index + 1}/${segmentList.size}"
                 ))
             }
             
@@ -200,15 +204,15 @@ class SmartVideoSplitter(
                 config = config,
                 segment = segment,
                 index = index,
-                totalSegments = segments.size,
+                totalSegments = segmentList.size,
                 onSegmentProgress = { segmentProgress ->
-                    val overall = ((index + segmentProgress / 100f) / segments.size * 100).toInt()
+                    val overall = ((index + segmentProgress / 100f) / segmentList.size * 100).toInt()
                     onProgress(Progress(
                         currentSegment = index + 1,
-                        totalSegments = segments.size,
+                        totalSegments = segmentList.size,
                         segmentProgress = segmentProgress,
                         overallProgress = overall,
-                        status = "片段 ${index + 1}/${segments.size} 编码中: $segmentProgress%"
+                        status = "片段 ${index + 1}/${segmentList.size} 编码中: $segmentProgress%"
                     ))
                 }
             )
@@ -227,15 +231,15 @@ class SmartVideoSplitter(
             }
         }
         
-        return results
+        results
     }
     
     /**
-     * 并行分割（同时处理多个）
+     * 并行分割
      */
     private suspend fun splitParallel(
         config: SplitConfig,
-        segments: List<SegmentInfo>,
+        segmentList: List<SegmentInfo>,
         onProgress: (Progress) -> Unit
     ): List<SegmentResult> = coroutineScope {
         
@@ -244,15 +248,15 @@ class SmartVideoSplitter(
         
         Log.i(TAG, "并行处理: 最大并发数=$parallelCount")
         
-        val deferredResults = segments.mapIndexed { index, segment ->
+        val deferredResults = segmentList.mapIndexed { index, segment ->
             async {
                 semaphore.withPermit {
                     val result = processSegment(
                         config = config,
                         segment = segment,
                         index = index,
-                        totalSegments = segments.size,
-                        onSegmentProgress = { /* 并行模式下不更新单个进度 */ }
+                        totalSegments = segmentList.size,
+                        onSegmentProgress = { }
                     )
                     
                     // 更新总进度
@@ -260,10 +264,10 @@ class SmartVideoSplitter(
                     withContext(Dispatchers.Main) {
                         onProgress(Progress(
                             currentSegment = completed,
-                            totalSegments = segments.size,
+                            totalSegments = segmentList.size,
                             segmentProgress = 100,
-                            overallProgress = (completed * 100) / segments.size,
-                            status = "已完成 $completed/${segments.size}"
+                            overallProgress = (completed * 100) / segmentList.size,
+                            status = "已完成 $completed/${segmentList.size}"
                         ))
                     }
                     
@@ -359,15 +363,10 @@ class SmartVideoSplitter(
         encoderConfig: EncoderConfig
     ): Array<String> {
         return mutableListOf<String>().apply {
-            // 输入参数
             addAll(listOf("-ss", startTimeSec.toString()))
             addAll(listOf("-i", inputPath))
             addAll(listOf("-t", durationSec.toString()))
-            
-            // 编码参数
             addAll(encoderConfig.buildOutputParams())
-            
-            // 输出
             addAll(listOf("-y", outputPath))
         }.toTypedArray()
     }
@@ -377,7 +376,7 @@ class SmartVideoSplitter(
      */
     private fun calculateSegments(durationMs: Long, intervalSeconds: Int): List<SegmentInfo> {
         val durationSec = durationMs / 1000.0
-        val segments = mutableListOf<SegmentInfo>()
+        val segmentList = mutableListOf<SegmentInfo>()
         
         var currentTime = 0.0
         var index = 0
@@ -385,11 +384,10 @@ class SmartVideoSplitter(
         while (currentTime < durationSec) {
             val remaining = durationSec - currentTime
             val segmentDuration = if (remaining < intervalSeconds) {
-                // 最后一段
-                if (remaining < 1.0 && segments.isNotEmpty()) {
+                if (remaining < 1.0 && segmentList.isNotEmpty()) {
                     // 不足1秒，合并到上一段
-                    val lastSegment = segments.removeAt(segments.lastIndex)
-                    segments.add(lastSegment.copy(
+                    val lastSegment = segmentList.removeAt(segmentList.lastIndex)
+                    segmentList.add(lastSegment.copy(
                         durationSec = lastSegment.durationSec + remaining
                     ))
                     break
@@ -400,7 +398,7 @@ class SmartVideoSplitter(
                 intervalSeconds.toDouble()
             }
             
-            segments.add(SegmentInfo(
+            segmentList.add(SegmentInfo(
                 index = index,
                 startTimeSec = currentTime,
                 durationSec = segmentDuration
@@ -410,7 +408,7 @@ class SmartVideoSplitter(
             index++
         }
         
-        return segments
+        return segmentList
     }
     
     /**
@@ -438,15 +436,6 @@ class SmartVideoSplitter(
         
         return fullLog.trim().lines().lastOrNull { it.isNotBlank() }?.take(50) ?: "处理失败"
     }
-    
-    /**
-     * 片段信息
-     */
-    private data class SegmentInfo(
-        val index: Int,
-        val startTimeSec: Double,
-        val durationSec: Double
-    )
     
     /**
      * 获取当前编码器信息
