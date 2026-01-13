@@ -22,8 +22,10 @@ import com.example.videosplitter.encoder.EncoderConfigFactory
 import com.example.videosplitter.encoder.HardwareCodecDetector
 import com.example.videosplitter.splitter.SmartVideoSplitter
 import com.example.videosplitter.utils.VideoUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
