@@ -29,7 +29,7 @@ class SmartVideoSplitter(
     
     // 硬件编码失败计数
     private var hardwareFailCount = 0
-    private val maxHardwareFailures = 2
+    private val maxHardwareFailures = 1  // 第一次失败就切换，提高兼容性
     
     // 并行数（CPU 核心数的一半，至少2个）
     private val parallelCount: Int by lazy {
@@ -181,13 +181,15 @@ class SmartVideoSplitter(
         segmentList: List<SegmentInfo>,
         onProgress: (Progress) -> Unit
     ): List<SegmentResult> = coroutineScope {
-        
+
         val results = mutableListOf<SegmentResult>()
-        
+        // 记录因硬件编码失败需要重试的片段
+        val failedSegmentsToRetry = mutableListOf<Pair<Int, SegmentInfo>>()
+
         for ((index, segment) in segmentList.withIndex()) {
             // 检查是否取消
             if (!isActive) break
-            
+
             // 更新进度
             withContext(Dispatchers.Main) {
                 onProgress(Progress(
@@ -198,7 +200,7 @@ class SmartVideoSplitter(
                     status = "正在处理片段 ${index + 1}/${segmentList.size}"
                 ))
             }
-            
+
             // 处理片段
             val result = processSegment(
                 config = config,
@@ -216,12 +218,15 @@ class SmartVideoSplitter(
                     ))
                 }
             )
-            
+
             results.add(result)
-            
+
             // 如果失败且是硬件编码，考虑回退
             if (!result.success && currentConfig?.isHardwareAccelerated == true) {
                 hardwareFailCount++
+                // 记录失败的片段，稍后用软件编码重试
+                failedSegmentsToRetry.add(Pair(index, segment))
+
                 if (hardwareFailCount >= maxHardwareFailures) {
                     Log.w(TAG, "硬件编码连续失败，切换到软件编码")
                     currentConfig = EncoderConfigFactory.getSoftwareConfig(config.qualityPreset)
@@ -230,7 +235,63 @@ class SmartVideoSplitter(
                 hardwareFailCount = 0
             }
         }
-        
+
+        // 如果切换到了软件编码，重试之前硬件编码失败的片段
+        if (failedSegmentsToRetry.isNotEmpty() && currentConfig?.isHardwareAccelerated == false) {
+            Log.i(TAG, "使用软件编码重试 ${failedSegmentsToRetry.size} 个失败的片段")
+
+            for ((originalIndex, segment) in failedSegmentsToRetry) {
+                // 检查是否取消
+                if (!isActive) break
+
+                withContext(Dispatchers.Main) {
+                    onProgress(Progress(
+                        currentSegment = originalIndex + 1,
+                        totalSegments = segmentList.size,
+                        segmentProgress = 0,
+                        overallProgress = 95, // 重试阶段显示接近完成
+                        status = "重试片段 ${originalIndex + 1}（软件编码）"
+                    ))
+                }
+
+                // 删除之前可能生成的损坏文件
+                val segmentNumber = String.format("%02d", originalIndex + 1)
+                val oldFile = File(config.outputDir, "${config.outputNamePrefix}_${segmentNumber}.mp4")
+                if (oldFile.exists()) {
+                    oldFile.delete()
+                    Log.d(TAG, "删除失败片段的旧文件: ${oldFile.name}")
+                }
+
+                val retryResult = processSegment(
+                    config = config,
+                    segment = segment,
+                    index = originalIndex,
+                    totalSegments = segmentList.size,
+                    onSegmentProgress = { segmentProgress ->
+                        onProgress(Progress(
+                            currentSegment = originalIndex + 1,
+                            totalSegments = segmentList.size,
+                            segmentProgress = segmentProgress,
+                            overallProgress = 95,
+                            status = "重试片段 ${originalIndex + 1} 编码中: $segmentProgress%"
+                        ))
+                    }
+                )
+
+                // 替换原来失败的结果
+                val resultIndex = results.indexOfFirst { it.index == originalIndex }
+                if (resultIndex >= 0) {
+                    results[resultIndex] = retryResult
+                }
+
+                if (retryResult.success) {
+                    Log.i(TAG, "片段 ${originalIndex + 1} 重试成功")
+                } else {
+                    Log.e(TAG, "片段 ${originalIndex + 1} 重试仍然失败: ${retryResult.error}")
+                }
+            }
+        }
+
         results
     }
     
