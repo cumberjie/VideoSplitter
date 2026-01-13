@@ -10,14 +10,13 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="瑙嗛瀹氭椂鍒嗗壊鍣?
+        android:text="视频定时分割器"
         android:textSize="24sp"
         android:textStyle="bold"
         android:textColor="#6750A4"
         android:layout_marginTop="32dp"
         android:layout_marginBottom="16dp"/>
 
-    <!-- 缂栫爜鍣ㄤ俊鎭崱鐗?-->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -30,7 +29,7 @@
             android:id="@+id/tvEncoderInfo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="妫€娴嬬紪鐮佽兘鍔涗腑..."
+            android:text="检测编码能力中..."
             android:textSize="13sp"
             android:textColor="#666666"/>
 
@@ -39,7 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="馃殌 鍚敤纭欢鍔犻€?
+            android:text="启用硬件加速"
             android:textSize="14sp"
             android:checked="true"/>
 
@@ -48,16 +47,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="鈿?骞惰澶勭悊锛堟洿蹇絾鏇磋€楃數锛?
+            android:text="并行处理（更快但更耗电）"
             android:textSize="14sp"
             android:checked="false"/>
 
-        <!-- 璐ㄩ噺閫夋嫨 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="瑙嗛璐ㄩ噺锛?
+            android:text="视频质量："
             android:textSize="13sp"
             android:textColor="#666666"/>
 
@@ -73,7 +71,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="蹇€?
+                android:text="快速"
                 android:textSize="13sp"/>
 
             <RadioButton
@@ -81,7 +79,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="骞宠　"
+                android:text="平衡"
                 android:textSize="13sp"
                 android:checked="true"/>
 
@@ -90,7 +88,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="楂樿川閲?
+                android:text="高质量"
                 android:textSize="13sp"/>
 
         </RadioGroup>
@@ -101,7 +99,7 @@
         android:id="@+id/btnSelectVideo"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="馃搧 閫夋嫨瑙嗛"
+        android:text="选择视频"
         android:textSize="16sp"
         android:backgroundTint="#6750A4"/>
 
@@ -109,7 +107,7 @@
         android:id="@+id/tvSelectedVideo"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="鏈€夋嫨瑙嗛"
+        android:text="未选择视频"
         android:textAlignment="center"
         android:layout_marginTop="8dp"
         android:layout_marginBottom="24dp"
@@ -118,7 +116,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="鍒嗗壊闂撮殧锛堢锛夛細"
+        android:text="分割间隔（秒）："
         android:textSize="16sp"
         android:textColor="#6750A4"/>
 
@@ -126,7 +124,7 @@
         android:id="@+id/etInterval"
         android:layout_width="200dp"
         android:layout_height="wrap_content"
-        android:hint="鐐瑰嚮涓嬫柟鎴栫洿鎺ヨ緭鍏?
+        android:hint="点击下方或直接输入"
         android:inputType="number"
         android:textAlignment="center"
         android:textSize="18sp"
@@ -147,7 +145,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="3绉?
+            android:text="3秒"
             android:textSize="14sp"
             android:layout_marginEnd="8dp"
             android:backgroundTint="#6750A4"/>
@@ -157,7 +155,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="4绉?
+            android:text="4秒"
             android:textSize="14sp"
             android:layout_marginStart="8dp"
             android:layout_marginEnd="8dp"
@@ -168,7 +166,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="5绉?
+            android:text="5秒"
             android:textSize="14sp"
             android:layout_marginStart="8dp"
             android:backgroundTint="#6750A4"/>
@@ -179,7 +177,7 @@
         android:id="@+id/btnSplit"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="鉁傦笍 寮€濮嬪垎鍓?
+        android:text="开始分割"
         android:textSize="16sp"
         android:enabled="false"
         android:backgroundTint="#6750A4"/>
@@ -189,7 +187,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="鉂?鍙栨秷"
+        android:text="取消"
         android:textSize="16sp"
         android:visibility="gone"
         android:backgroundTint="#F44336"/>
@@ -222,7 +220,7 @@
                 android:id="@+id/tvProgressPercent"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="姝ｅ湪鍒嗗壊 0%"
+                android:text="正在分割 0%"
                 android:textSize="20sp"
                 android:textStyle="bold"
                 android:textColor="#6750A4"/>
@@ -245,7 +243,7 @@
             android:id="@+id/tvProgressDetail"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="澶勭悊涓?.."
+            android:text="处理中..."
             android:textSize="14sp"
             android:textColor="#666666"/>
 
@@ -259,4 +257,5 @@
         android:layout_marginTop="16dp"
         android:textColor="#333333"
         android:textSize="14sp"/>
+
 </LinearLayout>
