@@ -80,8 +80,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="平衡"
-                android:textSize="13sp"
-                android:checked="true"/>
+                android:textSize="13sp"/>
 
             <RadioButton
                 android:id="@+id/rbQuality"
@@ -89,7 +88,8 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="高质量"
-                android:textSize="13sp"/>
+                android:textSize="13sp"
+                android:checked="true"/>
 
         </RadioGroup>
 
