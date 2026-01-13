@@ -460,11 +460,9 @@ class MainActivity : AppCompatActivity() {
         progressBar.progress = 100
         tvProgressPercent.text = "分割完成 100%"
         spinnerProgress.visibility = View.GONE
-        
-        progressContainer.postDelayed({
-            if (!isFinishing && !isDestroyed) {
-                progressContainer.visibility = View.GONE
-            }
-        }, 2000)
+
+        // 立即隐藏进度容器并恢复按钮状态
+        progressContainer.visibility = View.GONE
+        setProcessingState(false)
     }
 }
