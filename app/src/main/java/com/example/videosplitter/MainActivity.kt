@@ -399,17 +399,23 @@ class MainActivity : AppCompatActivity() {
                     tvProgressPercent.text = "正在分割 ${progress.overallProgress}%"
                     tvProgressDetail.text = progress.status
                 }
-                
-                // 显示结果
+
+                // 先隐藏进度条和恢复按钮状态
+                progressContainer.visibility = View.GONE
+                setProcessingState(false)
+
+                // 然后显示结果（确保结果文字立即可见）
                 showResult(result)
-                
+
             } catch (e: kotlinx.coroutines.CancellationException) {
+                progressContainer.visibility = View.GONE
+                setProcessingState(false)
                 tvStatus.text = "❌ 已取消分割"
             } catch (e: Exception) {
+                progressContainer.visibility = View.GONE
+                setProcessingState(false)
                 tvStatus.text = "❌ 分割失败: ${e.message}"
                 Log.e(TAG, "分割失败", e)
-            } finally {
-                setProcessingState(false)
             }
         }
     }
@@ -451,13 +457,13 @@ class MainActivity : AppCompatActivity() {
     private fun showResult(result: SmartVideoSplitter.SplitResult) {
         val displayPath = getOutputDisplayPath()
         val durationSec = result.totalDurationMs / 1000.0
-        
+
         val encoderInfo = if (result.usedHardwareAcceleration) {
             "🚀 硬件加速"
         } else {
             "💻 软件编码"
         }
-        
+
         if (result.success) {
             tvStatus.text = buildString {
                 appendLine("✅ 分割完成！")
@@ -476,13 +482,5 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        
-        progressBar.progress = 100
-        tvProgressPercent.text = "分割完成 100%"
-        spinnerProgress.visibility = View.GONE
-
-        // 立即隐藏进度容器并恢复按钮状态
-        progressContainer.visibility = View.GONE
-        setProcessingState(false)
     }
 }
