@@ -102,13 +102,13 @@ object EncoderConfigFactory {
     fun getSoftwareConfig(
         qualityPreset: QualityPreset = QualityPreset.BALANCED
     ): EncoderConfig {
-        
+
         val (crf, preset) = when (qualityPreset) {
-            QualityPreset.FAST -> Pair("23", "veryfast")
-            QualityPreset.BALANCED -> Pair("18", "fast")
-            QualityPreset.QUALITY -> Pair("15", "slow")
+            QualityPreset.FAST -> Pair("20", "veryfast")      // CRF 20 质量更好
+            QualityPreset.BALANCED -> Pair("16", "medium")    // CRF 16 高质量
+            QualityPreset.QUALITY -> Pair("12", "slow")       // CRF 12 接近无损
         }
-        
+
         return EncoderConfig(
             videoCodec = "libx264",
             videoCodecParams = listOf(
@@ -133,18 +133,18 @@ object EncoderConfigFactory {
         height: Int,
         qualityPreset: QualityPreset
     ): Long {
-        // 基础比特率（每像素）
+        // 基础比特率（每像素）- 大幅提高以接近原画质
         val bitsPerPixel = when (qualityPreset) {
-            QualityPreset.FAST -> 0.1
-            QualityPreset.BALANCED -> 0.15
-            QualityPreset.QUALITY -> 0.2
+            QualityPreset.FAST -> 0.15      // 提高到 0.15
+            QualityPreset.BALANCED -> 0.25  // 提高到 0.25
+            QualityPreset.QUALITY -> 0.40   // 提高到 0.40（接近原画质）
         }
-        
+
         val pixels = width * height
         val baseBitrate = (pixels * bitsPerPixel * 30).toLong() // 假设 30fps
-        
-        // 限制范围
-        return baseBitrate.coerceIn(2_000_000L, 50_000_000L)
+
+        // 提高上限，允许更高比特率
+        return baseBitrate.coerceIn(5_000_000L, 100_000_000L)
     }
     
     /**
