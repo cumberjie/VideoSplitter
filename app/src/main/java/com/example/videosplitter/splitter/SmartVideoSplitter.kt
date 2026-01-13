@@ -144,7 +144,13 @@ class SmartVideoSplitter(
         // 统计结果
         val successFiles = results.filter { it.success }.mapNotNull { it.outputFile }
         val failedIndices = results.filter { !it.success }.map { it.index }
-        
+
+        // 修正文件时间戳，确保相册按顺序显示
+        successFiles.sortedBy { it.name }.forEachIndexed { index, file ->
+            val timestamp = System.currentTimeMillis() + (index * 1000L)
+            file.setLastModified(timestamp)
+        }
+
         val totalDuration = System.currentTimeMillis() - startTime
         
         // 刷新媒体库
