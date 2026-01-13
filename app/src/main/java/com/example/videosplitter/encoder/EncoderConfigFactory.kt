@@ -85,8 +85,9 @@ object EncoderConfigFactory {
                 "-b:v", "${bitrate / 1_000_000}M",       // 目标比特率
                 "-maxrate", "${maxBitrate / 1_000_000}M", // 最大比特率
                 "-bufsize", "${bufferSize / 1_000_000}M", // 缓冲区大小
-                "-profile:v", "high",                     // H.264 High Profile
-                "-level", "4.1"                           // Level 4.1 (支持 1080p60)
+                "-profile:v", "baseline",                 // Baseline Profile 兼容性最好
+                "-level", "3.1",                          // Level 3.1 兼容性更好
+                "-pix_fmt", "yuv420p"                     // 确保像素格式兼容
             ),
             isHardwareAccelerated = true,
             description = "🚀 硬件加速编码 (MediaCodec)",
