@@ -22,10 +22,8 @@ import com.example.videosplitter.encoder.EncoderConfigFactory
 import com.example.videosplitter.encoder.HardwareCodecDetector
 import com.example.videosplitter.splitter.SmartVideoSplitter
 import com.example.videosplitter.utils.VideoUtils
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -44,7 +42,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvProgressDetail: TextView
     private lateinit var spinnerProgress: ProgressBar
     private lateinit var switchHardwareEncoder: Switch
-    private lateinit var switchParallel: Switch
     private lateinit var rgQuality: RadioGroup
 
     private lateinit var btn3s: Button
@@ -119,7 +116,6 @@ class MainActivity : AppCompatActivity() {
         tvProgressDetail = findViewById(R.id.tvProgressDetail)
         spinnerProgress = findViewById(R.id.spinnerProgress)
         switchHardwareEncoder = findViewById(R.id.switchHardwareEncoder)
-        switchParallel = findViewById(R.id.switchParallel)
         rgQuality = findViewById(R.id.rgQuality)
 
         btn3s = findViewById(R.id.btn3s)
@@ -136,30 +132,20 @@ class MainActivity : AppCompatActivity() {
         btn4s.setOnClickListener { etInterval.setText("4") }
         btn5s.setOnClickListener { etInterval.setText("5") }
         
-        switchHardwareEncoder.setOnCheckedChangeListener { _, isChecked ->
+        switchHardwareEncoder.setOnCheckedChangeListener { _, _ ->
             updateEncoderInfo()
-            if (!isChecked) {
-                switchParallel.isChecked = false
-            }
-        }
-        
-        switchParallel.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                Toast.makeText(this, "⚡ 并行模式：速度更快，但可能导致手机发热", Toast.LENGTH_SHORT).show()
-            }
         }
     }
 
     // ==================== 硬件编码器检测 ====================
     private fun detectHardwareEncoder() {
         val caps = HardwareCodecDetector.detectCapabilities()
-        
+
         switchHardwareEncoder.isEnabled = caps.supportsH264
         switchHardwareEncoder.isChecked = caps.supportsH264
-        switchParallel.isEnabled = caps.supportsH264
-        
+
         updateEncoderInfo()
-        
+
         if (!caps.supportsH264) {
             tvEncoderInfo.text = "⚠️ 设备不支持硬件加速\n将使用软件编码（速度较慢）"
         }
@@ -172,13 +158,10 @@ class MainActivity : AppCompatActivity() {
             videoWidth = videoInfo?.displaySize?.first ?: 1920,
             videoHeight = videoInfo?.displaySize?.second ?: 1080
         )
-        
+
         tvEncoderInfo.text = buildString {
             append(if (config.isHardwareAccelerated) "🚀 " else "💻 ")
             append(config.description)
-            if (config.isHardwareAccelerated) {
-                append("\n⚡ 预计速度提升 3-5 倍")
-            }
         }
     }
 
@@ -366,7 +349,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
-        // 准备配置
+        // 准备配置（并行处理始终开启）
         val config = SmartVideoSplitter.SplitConfig(
             inputPath = path,
             outputDir = getOutputDirectory(),
@@ -376,7 +359,7 @@ class MainActivity : AppCompatActivity() {
             videoWidth = info.displaySize.first,
             videoHeight = info.displaySize.second,
             useHardwareEncoder = switchHardwareEncoder.isChecked,
-            enableParallel = switchParallel.isChecked,
+            enableParallel = true,
             qualityPreset = getSelectedQualityPreset()
         )
         
@@ -384,13 +367,12 @@ class MainActivity : AppCompatActivity() {
         setProcessingState(true)
 
         val encoderInfo = if (switchHardwareEncoder.isChecked) "🚀 硬件加速" else "💻 软件编码"
-        val parallelInfo = if (switchParallel.isChecked) " | ⚡ 并行" else ""
         val qualityInfo = when (getSelectedQualityPreset()) {
             EncoderConfigFactory.QualityPreset.FAST -> "快速"
             EncoderConfigFactory.QualityPreset.BALANCED -> "平衡"
             EncoderConfigFactory.QualityPreset.QUALITY -> "高质量"
         }
-        tvStatus.text = "开始分割...\n$encoderInfo$parallelInfo | 质量: $qualityInfo"
+        tvStatus.text = "开始分割...\n$encoderInfo | 质量: $qualityInfo"
         
         // 启动分割任务
         splitJob = lifecycleScope.launch {
@@ -402,28 +384,27 @@ class MainActivity : AppCompatActivity() {
                     tvProgressDetail.text = progress.status
                 }
 
-                // 切换到主线程更新 UI
-                withContext(Dispatchers.Main) {
-                    // 先隐藏进度条和恢复按钮状态
-                    progressContainer.visibility = View.GONE
-                    setProcessingState(false)
-
-                    // 然后显示结果（确保结果文字立即可见）
-                    showResult(result)
+                // 分割完成，立即更新 UI
+                progressContainer.visibility = View.GONE
+                btnSplit.isEnabled = true
+                btnSelectVideo.isEnabled = true
+                switchHardwareEncoder.isEnabled = true
+                rgQuality.isEnabled = true
+                for (i in 0 until rgQuality.childCount) {
+                    rgQuality.getChildAt(i).isEnabled = true
                 }
+                btnCancel.visibility = View.GONE
+                spinnerProgress.visibility = View.GONE
+                showResult(result)
 
             } catch (e: kotlinx.coroutines.CancellationException) {
-                withContext(Dispatchers.Main) {
-                    progressContainer.visibility = View.GONE
-                    setProcessingState(false)
-                    tvStatus.text = "❌ 已取消分割"
-                }
+                progressContainer.visibility = View.GONE
+                setProcessingState(false)
+                tvStatus.text = "❌ 已取消分割"
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    progressContainer.visibility = View.GONE
-                    setProcessingState(false)
-                    tvStatus.text = "❌ 分割失败: ${e.message}"
-                }
+                progressContainer.visibility = View.GONE
+                setProcessingState(false)
+                tvStatus.text = "❌ 分割失败: ${e.message}"
                 Log.e(TAG, "分割失败", e)
             }
         }
@@ -446,16 +427,15 @@ class MainActivity : AppCompatActivity() {
         btnSplit.isEnabled = !isProcessing
         btnSelectVideo.isEnabled = !isProcessing
         switchHardwareEncoder.isEnabled = !isProcessing
-        switchParallel.isEnabled = !isProcessing
         rgQuality.isEnabled = !isProcessing
         for (i in 0 until rgQuality.childCount) {
             rgQuality.getChildAt(i).isEnabled = !isProcessing
         }
-        
+
         btnCancel.visibility = if (isProcessing) View.VISIBLE else View.GONE
         progressContainer.visibility = if (isProcessing) View.VISIBLE else View.GONE
         spinnerProgress.visibility = if (isProcessing) View.VISIBLE else View.GONE
-        
+
         if (isProcessing) {
             progressBar.progress = 0
             tvProgressPercent.text = "准备中..."
