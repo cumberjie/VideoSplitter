@@ -400,21 +400,28 @@ class MainActivity : AppCompatActivity() {
                     tvProgressDetail.text = progress.status
                 }
 
-                // 先隐藏进度条和恢复按钮状态
-                progressContainer.visibility = View.GONE
-                setProcessingState(false)
+                // 切换到主线程更新 UI
+                withContext(Dispatchers.Main) {
+                    // 先隐藏进度条和恢复按钮状态
+                    progressContainer.visibility = View.GONE
+                    setProcessingState(false)
 
-                // 然后显示结果（确保结果文字立即可见）
-                showResult(result)
+                    // 然后显示结果（确保结果文字立即可见）
+                    showResult(result)
+                }
 
             } catch (e: kotlinx.coroutines.CancellationException) {
-                progressContainer.visibility = View.GONE
-                setProcessingState(false)
-                tvStatus.text = "❌ 已取消分割"
+                withContext(Dispatchers.Main) {
+                    progressContainer.visibility = View.GONE
+                    setProcessingState(false)
+                    tvStatus.text = "❌ 已取消分割"
+                }
             } catch (e: Exception) {
-                progressContainer.visibility = View.GONE
-                setProcessingState(false)
-                tvStatus.text = "❌ 分割失败: ${e.message}"
+                withContext(Dispatchers.Main) {
+                    progressContainer.visibility = View.GONE
+                    setProcessingState(false)
+                    tvStatus.text = "❌ 分割失败: ${e.message}"
+                }
                 Log.e(TAG, "分割失败", e)
             }
         }
