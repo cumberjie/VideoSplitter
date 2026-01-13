@@ -43,7 +43,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spinnerProgress: ProgressBar
     private lateinit var switchHardwareEncoder: Switch
     private lateinit var switchParallel: Switch
-  
+    private lateinit var rgQuality: RadioGroup
+
     private lateinit var btn3s: Button
     private lateinit var btn4s: Button
     private lateinit var btn5s: Button
@@ -117,7 +118,8 @@ class MainActivity : AppCompatActivity() {
         spinnerProgress = findViewById(R.id.spinnerProgress)
         switchHardwareEncoder = findViewById(R.id.switchHardwareEncoder)
         switchParallel = findViewById(R.id.switchParallel)
-      
+        rgQuality = findViewById(R.id.rgQuality)
+
         btn3s = findViewById(R.id.btn3s)
         btn4s = findViewById(R.id.btn4s)
         btn5s = findViewById(R.id.btn5s)
@@ -372,15 +374,21 @@ class MainActivity : AppCompatActivity() {
             videoWidth = info.displaySize.first,
             videoHeight = info.displaySize.second,
             useHardwareEncoder = switchHardwareEncoder.isChecked,
-            enableParallel = switchParallel.isChecked
+            enableParallel = switchParallel.isChecked,
+            qualityPreset = getSelectedQualityPreset()
         )
         
         // 更新 UI 状态
         setProcessingState(true)
-        
+
         val encoderInfo = if (switchHardwareEncoder.isChecked) "🚀 硬件加速" else "💻 软件编码"
         val parallelInfo = if (switchParallel.isChecked) " | ⚡ 并行" else ""
-        tvStatus.text = "开始分割...\n$encoderInfo$parallelInfo"
+        val qualityInfo = when (getSelectedQualityPreset()) {
+            EncoderConfigFactory.QualityPreset.FAST -> "快速"
+            EncoderConfigFactory.QualityPreset.BALANCED -> "平衡"
+            EncoderConfigFactory.QualityPreset.QUALITY -> "高质量"
+        }
+        tvStatus.text = "开始分割...\n$encoderInfo$parallelInfo | 质量: $qualityInfo"
         
         // 启动分割任务
         splitJob = lifecycleScope.launch {
@@ -410,12 +418,24 @@ class MainActivity : AppCompatActivity() {
         splitJob?.cancel()
         tvStatus.text = "正在取消..."
     }
-    
+
+    private fun getSelectedQualityPreset(): EncoderConfigFactory.QualityPreset {
+        return when (rgQuality.checkedRadioButtonId) {
+            R.id.rbFast -> EncoderConfigFactory.QualityPreset.FAST
+            R.id.rbQuality -> EncoderConfigFactory.QualityPreset.QUALITY
+            else -> EncoderConfigFactory.QualityPreset.BALANCED
+        }
+    }
+
     private fun setProcessingState(isProcessing: Boolean) {
         btnSplit.isEnabled = !isProcessing
         btnSelectVideo.isEnabled = !isProcessing
         switchHardwareEncoder.isEnabled = !isProcessing
         switchParallel.isEnabled = !isProcessing
+        rgQuality.isEnabled = !isProcessing
+        for (i in 0 until rgQuality.childCount) {
+            rgQuality.getChildAt(i).isEnabled = !isProcessing
+        }
         
         btnCancel.visibility = if (isProcessing) View.VISIBLE else View.GONE
         progressContainer.visibility = if (isProcessing) View.VISIBLE else View.GONE
