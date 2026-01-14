@@ -19,4 +19,28 @@ data class EncoderConfig(
         HIGH("高"),
         VERY_HIGH("极高")
     }
+
+    /**
+     * 构建 FFmpeg 输出参数
+     */
+    fun buildOutputParams(): List<String> {
+        return mutableListOf<String>().apply {
+            addAll(listOf("-c:v", videoCodec))
+            addAll(videoCodecParams)
+            addAll(listOf("-c:a", "aac", "-b:a", "128k"))
+        }
+    }
+
+    companion object {
+        /**
+         * 默认软件编码配置
+         */
+        val DEFAULT_SOFTWARE = EncoderConfig(
+            videoCodec = "libx264",
+            videoCodecParams = listOf("-crf", "18", "-preset", "medium"),
+            isHardwareAccelerated = false,
+            description = "软件编码 (libx264)",
+            qualityLevel = QualityLevel.HIGH
+        )
+    }
 }
