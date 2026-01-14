@@ -83,7 +83,8 @@ object EncoderConfigFactory {
         return EncoderConfig(
             videoCodec = "h264_mediacodec",
             videoCodecParams = listOf(
-                "-b:v", "${bitrateM}M"  // 只使用目标比特率，去掉 maxrate/bufsize 提高兼容性
+                "-b:v", "${bitrateM}M",
+                "-g", "30"  // 设置 gop_size（关键帧间隔），MediaCodec 必需参数
             ),
             isHardwareAccelerated = true,
             description = "🚀 硬件加速编码 (MediaCodec)",
