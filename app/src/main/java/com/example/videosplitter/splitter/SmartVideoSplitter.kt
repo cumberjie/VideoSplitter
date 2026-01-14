@@ -54,9 +54,11 @@ class SmartVideoSplitter(
      */
     data class FailedSegmentInfo(
         val segmentIndex: Int,
-        val errorReason: String
+        val errorReason: String,
+        val ffmpegCommand: String? = null,  // FFmpeg 命令
+        val fullErrorLog: String? = null     // 完整错误日志（截取关键部分）
     )
-    
+
     /**
      * 单个片段的结果
      */
@@ -64,7 +66,9 @@ class SmartVideoSplitter(
         val index: Int,
         val success: Boolean,
         val outputFile: File?,
-        val error: String? = null
+        val error: String? = null,
+        val ffmpegCommand: String? = null,
+        val fullErrorLog: String? = null
     )
     
     /**
@@ -154,11 +158,13 @@ class SmartVideoSplitter(
         val successFiles = results.filter { it.success }.mapNotNull { it.outputFile }
         val failedIndices = results.filter { !it.success }.map { it.index }
 
-        // 收集失败片段的详细信息
+        // 收集失败片段的详细信息（包含 FFmpeg 命令和错误日志）
         val failedDetails = results.filter { !it.success }.map { segmentResult ->
             FailedSegmentInfo(
                 segmentIndex = segmentResult.index + 1,
-                errorReason = segmentResult.error ?: "未知错误"
+                errorReason = segmentResult.error ?: "未知错误",
+                ffmpegCommand = segmentResult.ffmpegCommand,
+                fullErrorLog = segmentResult.fullErrorLog
             )
         }
 
@@ -374,12 +380,12 @@ class SmartVideoSplitter(
         totalSegments: Int,
         onSegmentProgress: (Int) -> Unit
     ): SegmentResult = suspendCancellableCoroutine { continuation ->
-        
+
         val segmentNumber = String.format("%02d", index + 1)
         val outputFile = File(config.outputDir, "${config.outputNamePrefix}_${segmentNumber}.mp4")
-        
+
         val encoderConfig = currentConfig ?: EncoderConfig.DEFAULT_SOFTWARE
-        
+
         // 构建 FFmpeg 命令
         val command = buildFFmpegCommand(
             inputPath = config.inputPath,
@@ -388,16 +394,17 @@ class SmartVideoSplitter(
             outputPath = outputFile.absolutePath,
             encoderConfig = encoderConfig
         )
-        
-        Log.d(TAG, "片段 ${index + 1}: ${command.joinToString(" ")}")
-        
+
+        val commandStr = command.joinToString(" ")
+        Log.d(TAG, "片段 ${index + 1}: $commandStr")
+
         val targetDurationMs = (segment.durationSec * 1000).toLong()
-        
+
         val session = FFmpegKit.executeWithArgumentsAsync(
             command,
             { session ->
                 val success = ReturnCode.isSuccess(session.returnCode)
-                
+
                 if (success) {
                     Log.i(TAG, "片段 ${index + 1} 完成: ${outputFile.name}")
                     continuation.resume(SegmentResult(
@@ -406,13 +413,19 @@ class SmartVideoSplitter(
                         outputFile = outputFile
                     ))
                 } else {
-                    val error = session.allLogsAsString
-                    Log.e(TAG, "片段 ${index + 1} 失败: $error")
+                    val fullLog = session.allLogsAsString ?: ""
+                    Log.e(TAG, "片段 ${index + 1} 失败: $fullLog")
+
+                    // 提取关键错误日志（最后 500 字符）
+                    val keyErrorLog = extractKeyErrorLog(fullLog)
+
                     continuation.resume(SegmentResult(
                         index = index,
                         success = false,
                         outputFile = null,
-                        error = extractErrorSummary(error)
+                        error = extractErrorSummary(fullLog),
+                        ffmpegCommand = commandStr,
+                        fullErrorLog = keyErrorLog
                     ))
                 }
             },
@@ -429,12 +442,37 @@ class SmartVideoSplitter(
                 }
             }
         )
-        
+
         // 支持取消
         continuation.invokeOnCancellation {
             Log.w(TAG, "片段 ${index + 1} 被取消")
             session.cancel()
         }
+    }
+
+    /**
+     * 提取关键错误日志
+     */
+    private fun extractKeyErrorLog(fullLog: String): String {
+        if (fullLog.isEmpty()) return ""
+
+        // 提取包含 error/failed/configure 的行
+        val errorLines = fullLog.lines()
+            .filter {
+                it.contains("error", ignoreCase = true) ||
+                it.contains("failed", ignoreCase = true) ||
+                it.contains("configure", ignoreCase = true) ||
+                it.contains("codec", ignoreCase = true)
+            }
+            .takeLast(5)
+            .joinToString("\n")
+
+        if (errorLines.isNotEmpty()) {
+            return errorLines.take(500)
+        }
+
+        // 如果没找到，返回最后 300 字符
+        return fullLog.takeLast(300)
     }
     
     /**
