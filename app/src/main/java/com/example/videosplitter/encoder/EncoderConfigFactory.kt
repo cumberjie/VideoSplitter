@@ -84,7 +84,9 @@ object EncoderConfigFactory {
             videoCodec = "h264_mediacodec",
             videoCodecParams = listOf(
                 "-b:v", "${bitrateM}M",
-                "-g", "30"  // 设置 gop_size（关键帧间隔），MediaCodec 必需参数
+                "-g", "30",              // 关键帧间隔，MediaCodec 必需参数
+                "-profile:v", "main",    // H.264 Main Profile，兼容性好
+                "-level", "4.0"          // 支持 1080p@30fps
             ),
             isHardwareAccelerated = true,
             description = "🚀 硬件加速编码 (MediaCodec)",
@@ -143,8 +145,8 @@ object EncoderConfigFactory {
         val pixels = width * height
         val baseBitrate = (pixels * bitsPerPixel * 30).toLong() // 假设 30fps
 
-        // 提高上限，允许更高比特率
-        return baseBitrate.coerceIn(5_000_000L, 100_000_000L)
+        // 限制比特率范围，提高 MediaCodec 兼容性
+        return baseBitrate.coerceIn(2_000_000L, 20_000_000L)
     }
     
     /**
