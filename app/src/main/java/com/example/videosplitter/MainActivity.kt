@@ -466,8 +466,14 @@ class MainActivity : AppCompatActivity() {
                 appendLine("成功: ${result.outputFiles.size} 个")
                 appendLine("失败: ${result.failedSegments.size} 个")
                 appendLine("保存位置: $displayPath")
-                result.errorMessage?.let {
-                    appendLine("\n错误: $it")
+
+                // 显示详细的失败原因
+                if (result.failedDetails.isNotEmpty()) {
+                    appendLine()
+                    appendLine("❌ 失败详情:")
+                    result.failedDetails.forEach { detail ->
+                        appendLine("  片段${detail.segmentIndex}: ${detail.errorReason}")
+                    }
                 }
             }
         }
