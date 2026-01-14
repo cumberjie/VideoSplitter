@@ -45,7 +45,16 @@ class SmartVideoSplitter(
         val failedSegments: List<Int>,
         val totalDurationMs: Long,
         val usedHardwareAcceleration: Boolean,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val failedDetails: List<FailedSegmentInfo> = emptyList()  // 失败片段的详细信息
+    )
+
+    /**
+     * 失败片段的详细信息
+     */
+    data class FailedSegmentInfo(
+        val segmentIndex: Int,
+        val errorReason: String
     )
     
     /**
@@ -145,6 +154,14 @@ class SmartVideoSplitter(
         val successFiles = results.filter { it.success }.mapNotNull { it.outputFile }
         val failedIndices = results.filter { !it.success }.map { it.index }
 
+        // 收集失败片段的详细信息
+        val failedDetails = results.filter { !it.success }.map { segmentResult ->
+            FailedSegmentInfo(
+                segmentIndex = segmentResult.index + 1,
+                errorReason = segmentResult.error ?: "未知错误"
+            )
+        }
+
         // 修正文件时间戳，确保相册按顺序显示
         successFiles.sortedBy { it.name }.forEachIndexed { index, file ->
             val timestamp = System.currentTimeMillis() + (index * 1000L)
@@ -152,7 +169,7 @@ class SmartVideoSplitter(
         }
 
         val totalDuration = System.currentTimeMillis() - startTime
-        
+
         // 刷新媒体库
         if (successFiles.isNotEmpty()) {
             MediaScannerConnection.scanFile(
@@ -162,7 +179,7 @@ class SmartVideoSplitter(
                 null
             )
         }
-        
+
         val result = SplitResult(
             success = failedIndices.isEmpty(),
             outputFiles = successFiles,
@@ -170,8 +187,9 @@ class SmartVideoSplitter(
             totalDurationMs = totalDuration,
             usedHardwareAcceleration = currentConfig?.isHardwareAccelerated == true,
             errorMessage = if (failedIndices.isNotEmpty()) {
-                "片段 ${failedIndices.joinToString(", ")} 处理失败"
-            } else null
+                "片段 ${failedIndices.map { it + 1 }.joinToString(", ")} 处理失败"
+            } else null,
+            failedDetails = failedDetails
         )
         
         Log.i(TAG, "分割完成: 成功=${successFiles.size}, 失败=${failedIndices.size}, 耗时=${totalDuration}ms")
@@ -483,24 +501,58 @@ class SmartVideoSplitter(
      */
     private fun extractErrorSummary(fullLog: String?): String {
         if (fullLog.isNullOrEmpty()) return "未知错误"
-        
-        val errorPatterns = listOf(
+
+        // 硬件编码相关的详细错误
+        val hardwareErrorPatterns = listOf(
+            "configure failed" to "硬件编码器配置失败",
+            "dequeueOutputBuffer" to "硬件编码器输出缓冲区错误",
+            "dequeueInputBuffer" to "硬件编码器输入缓冲区错误",
+            "queueInputBuffer" to "硬件编码器队列错误",
+            "MediaCodec" to "MediaCodec 硬件编码错误",
+            "h264_mediacodec" to "H.264 硬件编码器不兼容",
+            "codec not currently supported" to "编码器不支持当前格式",
+            "Failed to initialize" to "编码器初始化失败",
+            "Error while opening encoder" to "无法打开编码器",
+            "Encoder.*not found" to "找不到编码器"
+        )
+
+        // 通用错误
+        val generalErrorPatterns = listOf(
             "No such file" to "文件不存在",
             "Permission denied" to "权限被拒绝",
             "Invalid data" to "无效数据",
             "Encoder not found" to "编码器未找到",
             "Out of memory" to "内存不足",
             "No space left" to "存储空间不足",
-            "mediacodec" to "硬件编码器错误",
-            "Invalid argument" to "参数无效"
+            "Invalid argument" to "参数无效",
+            "Conversion failed" to "格式转换失败",
+            "Error.*muxing" to "封装错误",
+            "broken pipe" to "管道中断"
         )
-        
-        for ((pattern, message) in errorPatterns) {
+
+        // 先检查硬件编码错误
+        for ((pattern, message) in hardwareErrorPatterns) {
             if (fullLog.contains(pattern, ignoreCase = true)) {
                 return message
             }
         }
-        
+
+        // 再检查通用错误
+        for ((pattern, message) in generalErrorPatterns) {
+            if (fullLog.contains(Regex(pattern, RegexOption.IGNORE_CASE))) {
+                return message
+            }
+        }
+
+        // 尝试提取 FFmpeg 的错误行
+        val errorLine = fullLog.lines()
+            .filter { it.contains("error", ignoreCase = true) || it.contains("failed", ignoreCase = true) }
+            .lastOrNull { it.isNotBlank() }
+
+        if (errorLine != null) {
+            return errorLine.take(80)
+        }
+
         return fullLog.trim().lines().lastOrNull { it.isNotBlank() }?.take(50) ?: "处理失败"
     }
     
