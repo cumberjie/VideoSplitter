@@ -36,12 +36,15 @@ data class EncoderConfig(
             addAll(listOf("-c:a", audioCodec))
             addAll(listOf("-b:a", audioBitrate))
 
-            // 通用参数
-            addAll(listOf("-avoid_negative_ts", "make_zero"))
-
-            // 像素格式：硬件编码让 FFmpeg 自动选择，软件编码使用 yuv420p
-            if (!isHardwareAccelerated) {
+            // 硬件编码使用更兼容的参数
+            if (isHardwareAccelerated) {
+                // 不指定 pix_fmt，让 MediaCodec 自动选择
+                // 添加 -movflags 确保输出文件兼容性
+                addAll(listOf("-movflags", "+faststart"))
+            } else {
+                // 软件编码使用标准参数
                 addAll(listOf("-pix_fmt", "yuv420p"))
+                addAll(listOf("-avoid_negative_ts", "make_zero"))
             }
         }
     }
