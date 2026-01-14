@@ -31,16 +31,18 @@ data class EncoderConfig(
             // 视频编码
             addAll(listOf("-c:v", videoCodec))
             addAll(videoCodecParams)
-            
+
             // 音频编码
             addAll(listOf("-c:a", audioCodec))
             addAll(listOf("-b:a", audioBitrate))
-            
+
             // 通用参数
             addAll(listOf("-avoid_negative_ts", "make_zero"))
-            
-            // 像素格式（确保兼容性）
-            addAll(listOf("-pix_fmt", "yuv420p"))
+
+            // 像素格式：硬件编码让 FFmpeg 自动选择，软件编码使用 yuv420p
+            if (!isHardwareAccelerated) {
+                addAll(listOf("-pix_fmt", "yuv420p"))
+            }
         }
     }
     
