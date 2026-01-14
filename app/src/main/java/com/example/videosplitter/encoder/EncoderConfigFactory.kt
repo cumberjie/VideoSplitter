@@ -67,24 +67,23 @@ object EncoderConfigFactory {
     
     /**
      * 获取硬件编码配置
+     * 注意：部分低端设备（如华为畅享系列）对 -maxrate/-bufsize 参数不兼容
+     * 使用简化参数提高兼容性
      */
     fun getHardwareConfig(
         videoWidth: Int = 1920,
         videoHeight: Int = 1080,
         qualityPreset: QualityPreset = QualityPreset.BALANCED
     ): EncoderConfig {
-        
+
         // 根据分辨率计算推荐比特率
         val bitrate = calculateRecommendedBitrate(videoWidth, videoHeight, qualityPreset)
-        val maxBitrate = (bitrate * 1.25).toLong()
-        val bufferSize = bitrate * 2
-        
+        val bitrateM = (bitrate / 1_000_000).coerceAtLeast(1)
+
         return EncoderConfig(
             videoCodec = "h264_mediacodec",
             videoCodecParams = listOf(
-                "-b:v", "${bitrate / 1_000_000}M",       // 目标比特率
-                "-maxrate", "${maxBitrate / 1_000_000}M", // 最大比特率
-                "-bufsize", "${bufferSize / 1_000_000}M"  // 缓冲区大小
+                "-b:v", "${bitrateM}M"  // 只使用目标比特率，去掉 maxrate/bufsize 提高兼容性
             ),
             isHardwareAccelerated = true,
             description = "🚀 硬件加速编码 (MediaCodec)",
