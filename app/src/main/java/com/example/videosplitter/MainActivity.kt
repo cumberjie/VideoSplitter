@@ -467,12 +467,33 @@ class MainActivity : AppCompatActivity() {
                 appendLine("失败: ${result.failedSegments.size} 个")
                 appendLine("保存位置: $displayPath")
 
-                // 显示详细的失败原因
+                // 显示详细的失败原因（只显示第一个失败片段的详情，避免太长）
                 if (result.failedDetails.isNotEmpty()) {
+                    val firstFailed = result.failedDetails.first()
                     appendLine()
-                    appendLine("❌ 失败详情:")
-                    result.failedDetails.forEach { detail ->
-                        appendLine("  片段${detail.segmentIndex}: ${detail.errorReason}")
+                    appendLine("❌ 失败详情 (片段${firstFailed.segmentIndex}):")
+                    appendLine("原因: ${firstFailed.errorReason}")
+
+                    // 显示 FFmpeg 命令
+                    firstFailed.ffmpegCommand?.let { cmd ->
+                        appendLine()
+                        appendLine("📋 FFmpeg 命令:")
+                        appendLine(cmd)
+                    }
+
+                    // 显示错误日志
+                    firstFailed.fullErrorLog?.let { log ->
+                        if (log.isNotBlank()) {
+                            appendLine()
+                            appendLine("📝 错误日志:")
+                            appendLine(log)
+                        }
+                    }
+
+                    // 如果有多个失败，提示还有其他
+                    if (result.failedDetails.size > 1) {
+                        appendLine()
+                        appendLine("(还有 ${result.failedDetails.size - 1} 个片段失败，原因类似)")
                     }
                 }
             }
