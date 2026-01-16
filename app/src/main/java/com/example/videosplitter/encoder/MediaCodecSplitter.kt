@@ -79,7 +79,7 @@ class MediaCodecSplitter {
             }
 
             // 5. 创建硬件编码器
-            encoder = createHardwareEncoder(mime)
+            encoder = createHardwareEncoder(mime, outputFormat)
             if (encoder == null) {
                 return@withContext SegmentResult(false, null, "无法创建硬件编码器")
             }
@@ -294,16 +294,38 @@ class MediaCodecSplitter {
     /**
      * 创建硬件编码器
      */
-    private fun createHardwareEncoder(mime: String): MediaCodec? {
-        val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+    private fun createHardwareEncoder(mime: String, format: MediaFormat): MediaCodec? {
+        // 方法1：让系统自动选择最佳编码器
+        try {
+            val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            val encoderName = codecList.findEncoderForFormat(format)
+            if (encoderName != null) {
+                Log.d(TAG, "系统推荐编码器: $encoderName")
+                // 检查是否是软件编码器
+                val nameLower = encoderName.lowercase()
+                if (!nameLower.contains("omx.google") && !nameLower.contains("c2.android.avc") && !nameLower.contains("sw")) {
+                    return MediaCodec.createByCodecName(encoderName)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "findEncoderForFormat 失败: ${e.message}")
+        }
+
+        // 方法2：手动遍历查找硬件编码器
+        val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
 
         for (info in codecList.codecInfos) {
             if (!info.isEncoder) continue
             if (!info.supportedTypes.any { it.equals(mime, ignoreCase = true) }) continue
 
-            // 优先选择硬件编码器
             val name = info.name.lowercase()
-            if (name.contains("omx.google") || name.contains("c2.android") || name.contains("sw")) {
+
+            // 跳过明确的软件编码器
+            if (name.contains("omx.google") ||
+                name.contains("c2.android.avc") ||
+                name.contains("swcodec") ||
+                name == "c2.android.h264.encoder") {
+                Log.d(TAG, "跳过软件编码器: ${info.name}")
                 continue
             }
 
@@ -315,7 +337,14 @@ class MediaCodecSplitter {
             }
         }
 
-        return null
+        // 方法3：最后尝试直接按 MIME 创建（让系统决定）
+        return try {
+            Log.d(TAG, "尝试默认编码器")
+            MediaCodec.createEncoderByType(mime)
+        } catch (e: Exception) {
+            Log.e(TAG, "无法创建任何编码器: ${e.message}")
+            null
+        }
     }
 
     /**
