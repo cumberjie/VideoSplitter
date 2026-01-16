@@ -114,15 +114,22 @@ class MediaCodecSplitter {
             val bufferInfo = MediaCodec.BufferInfo()
             val totalDurationUs = segment.endTimeUs - segment.startTimeUs
             var inputDone = false
-            var outputDone = false
-            var decoderOutputAvailable = true
+            var decoderDone = false
+            var encoderDone = false
 
             // 11. 解码-编码循环
-            while (!outputDone && isActive) {
+            val timeoutUs = 1000L  // 1ms，减少等待时间
+            var stallCount = 0
+            val maxStallCount = 3000  // 最多空转3秒
+
+            while (!encoderDone && isActive) {
+                var didWork = false
+
                 // 喂数据给解码器
                 if (!inputDone) {
-                    val inputBufferIndex = decoder.dequeueInputBuffer(10000)
+                    val inputBufferIndex = decoder.dequeueInputBuffer(timeoutUs)
                     if (inputBufferIndex >= 0) {
+                        didWork = true
                         val inputBuffer = decoder.getInputBuffer(inputBufferIndex)!!
                         val sampleSize = extractor.readSampleData(inputBuffer, 0)
 
@@ -130,6 +137,7 @@ class MediaCodecSplitter {
                             decoder.queueInputBuffer(inputBufferIndex, 0, 0, 0,
                                 MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
+                            Log.d(TAG, "输入完成")
                         } else {
                             val presentationTimeUs = extractor.sampleTime - segment.startTimeUs
                             decoder.queueInputBuffer(inputBufferIndex, 0, sampleSize,
@@ -139,37 +147,42 @@ class MediaCodecSplitter {
                     }
                 }
 
-                // 从解码器获取输出
-                if (decoderOutputAvailable) {
-                    val decoderStatus = decoder.dequeueOutputBuffer(bufferInfo, 10000)
+                // 从解码器获取输出（即使 inputDone 也要继续处理）
+                if (!decoderDone) {
+                    val decoderStatus = decoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
                     when {
-                        decoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                            decoderOutputAvailable = false
-                        }
                         decoderStatus >= 0 -> {
+                            didWork = true
                             val doRender = bufferInfo.size != 0
                             decoder.releaseOutputBuffer(decoderStatus, doRender)
 
                             if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                                 encoder.signalEndOfInputStream()
-                                decoderOutputAvailable = false
+                                decoderDone = true
+                                Log.d(TAG, "解码完成")
                             }
+                        }
+                        decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                            Log.d(TAG, "解码器输出格式变化")
                         }
                     }
                 }
 
                 // 从编码器获取输出
-                val encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                val encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
                 when {
                     encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        didWork = true
                         if (!muxerStarted) {
                             val newFormat = encoder.outputFormat
                             muxerVideoTrack = muxer.addTrack(newFormat)
                             muxer.start()
                             muxerStarted = true
+                            Log.d(TAG, "Muxer 启动")
                         }
                     }
                     encoderStatus >= 0 -> {
+                        didWork = true
                         val encodedData = encoder.getOutputBuffer(encoderStatus)
                         if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
                             encodedData.position(bufferInfo.offset)
@@ -185,14 +198,21 @@ class MediaCodecSplitter {
                         encoder.releaseOutputBuffer(encoderStatus, false)
 
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            outputDone = true
+                            encoderDone = true
+                            Log.d(TAG, "编码完成")
                         }
                     }
                 }
 
-                // 重置标志
-                if (!decoderOutputAvailable && !inputDone) {
-                    decoderOutputAvailable = true
+                // 防止死循环
+                if (didWork) {
+                    stallCount = 0
+                } else {
+                    stallCount++
+                    if (stallCount > maxStallCount) {
+                        Log.w(TAG, "循环超时，强制退出")
+                        break
+                    }
                 }
             }
 
