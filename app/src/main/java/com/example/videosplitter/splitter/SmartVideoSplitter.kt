@@ -8,6 +8,7 @@ import com.arthenica.ffmpegkit.ReturnCode
 import com.example.videosplitter.encoder.EncoderConfig
 import com.example.videosplitter.encoder.EncoderConfigFactory
 import com.example.videosplitter.encoder.HardwareCodecDetector
+import com.example.videosplitter.encoder.MediaCodecSplitter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -30,6 +31,9 @@ class SmartVideoSplitter(
     // 硬件编码失败计数
     private var hardwareFailCount = 0
     private val maxHardwareFailures = 1  // 第一次失败就切换，提高兼容性
+
+    // 纯 MediaCodec 硬件分割器
+    private val mediaCodecSplitter = MediaCodecSplitter()
     
     // 并行数（CPU 核心数的一半，至少2个）
     private val parallelCount: Int by lazy {
@@ -372,6 +376,7 @@ class SmartVideoSplitter(
     
     /**
      * 处理单个片段
+     * 硬件编码走 MediaCodec，软件编码走 FFmpeg
      */
     private suspend fun processSegment(
         config: SplitConfig,
@@ -379,14 +384,80 @@ class SmartVideoSplitter(
         index: Int,
         totalSegments: Int,
         onSegmentProgress: (Int) -> Unit
-    ): SegmentResult = suspendCancellableCoroutine { continuation ->
-
+    ): SegmentResult {
         val segmentNumber = String.format("%02d", index + 1)
         val outputFile = File(config.outputDir, "${config.outputNamePrefix}_${segmentNumber}.mp4")
 
         val encoderConfig = currentConfig ?: EncoderConfig.DEFAULT_SOFTWARE
 
-        // 构建 FFmpeg 命令
+        // 硬件编码走纯 MediaCodec，软件编码走 FFmpeg
+        return if (encoderConfig.isHardwareAccelerated) {
+            processSegmentWithMediaCodec(config, segment, index, outputFile, onSegmentProgress)
+        } else {
+            processSegmentWithFFmpeg(config, segment, index, outputFile, encoderConfig, onSegmentProgress)
+        }
+    }
+
+    /**
+     * 使用纯 MediaCodec 处理片段（硬件加速）
+     */
+    private suspend fun processSegmentWithMediaCodec(
+        config: SplitConfig,
+        segment: SegmentInfo,
+        index: Int,
+        outputFile: File,
+        onSegmentProgress: (Int) -> Unit
+    ): SegmentResult {
+        Log.d(TAG, "片段 ${index + 1}: 使用 MediaCodec 硬件编码")
+
+        val startTimeUs = (segment.startTimeSec * 1_000_000).toLong()
+        val endTimeUs = ((segment.startTimeSec + segment.durationSec) * 1_000_000).toLong()
+
+        val splitSegment = MediaCodecSplitter.SplitSegment(
+            startTimeUs = startTimeUs,
+            endTimeUs = endTimeUs,
+            outputFile = outputFile
+        )
+
+        val result = mediaCodecSplitter.splitSegment(
+            inputPath = config.inputPath,
+            segment = splitSegment,
+            onProgress = onSegmentProgress
+        )
+
+        return if (result.success) {
+            Log.i(TAG, "片段 ${index + 1} 完成: ${outputFile.name}")
+            SegmentResult(
+                index = index,
+                success = true,
+                outputFile = result.outputFile
+            )
+        } else {
+            Log.e(TAG, "片段 ${index + 1} 失败: ${result.error}")
+            SegmentResult(
+                index = index,
+                success = false,
+                outputFile = null,
+                error = result.error,
+                ffmpegCommand = null,
+                fullErrorLog = result.error
+            )
+        }
+    }
+
+    /**
+     * 使用 FFmpeg 处理片段（软件编码）
+     */
+    private suspend fun processSegmentWithFFmpeg(
+        config: SplitConfig,
+        segment: SegmentInfo,
+        index: Int,
+        outputFile: File,
+        encoderConfig: EncoderConfig,
+        onSegmentProgress: (Int) -> Unit
+    ): SegmentResult = suspendCancellableCoroutine { continuation ->
+
+        // 构建 FFmpeg 命令（软件编码，-ss 放前面提高速度）
         val command = buildFFmpegCommand(
             inputPath = config.inputPath,
             startTimeSec = segment.startTimeSec,
@@ -416,7 +487,6 @@ class SmartVideoSplitter(
                     val fullLog = session.allLogsAsString ?: ""
                     Log.e(TAG, "片段 ${index + 1} 失败: $fullLog")
 
-                    // 提取关键错误日志（最后 500 字符）
                     val keyErrorLog = extractKeyErrorLog(fullLog)
 
                     continuation.resume(SegmentResult(
@@ -443,7 +513,6 @@ class SmartVideoSplitter(
             }
         )
 
-        // 支持取消
         continuation.invokeOnCancellation {
             Log.w(TAG, "片段 ${index + 1} 被取消")
             session.cancel()
