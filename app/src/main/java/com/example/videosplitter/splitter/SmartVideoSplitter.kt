@@ -10,35 +10,36 @@ import com.example.videosplitter.encoder.EncoderConfigFactory
 import com.example.videosplitter.encoder.HardwareCodecDetector
 import com.example.videosplitter.encoder.MediaCodecSplitter
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
 /**
  * 智能视频分割器
- * 支持硬件加速、自动回退、并行处理、取消操作
+ * 支持硬件加速、自动回退、串行处理、取消操作
+ *
+ * 针对低端设备（如骁龙680）优化：
+ * - 强制串行处理，避免资源竞争
+ * - 使用全局 Mutex 锁确保同一时间只处理一个片段
  */
 class SmartVideoSplitter(
     private val context: Context
 ) {
     private val TAG = "SmartVideoSplitter"
-    
+
     // 当前编码配置
     private var currentConfig: EncoderConfig? = null
-    
+
     // 硬件编码失败计数
     private var hardwareFailCount = 0
     private val maxHardwareFailures = 1  // 第一次失败就切换，提高兼容性
 
     // 纯 MediaCodec 硬件分割器
     private val mediaCodecSplitter = MediaCodecSplitter()
-    
-    // 并行数（CPU 核心数的一半，至少2个）
-    private val parallelCount: Int by lazy {
-        (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
-    }
+
+    // 全局 Mutex 锁，确保同一时间只有一个片段在处理（针对低端设备优化）
+    private val processingMutex = Mutex()
     
     /**
      * 分割结果
@@ -123,10 +124,10 @@ class SmartVideoSplitter(
         Log.i(TAG, "输出目录: ${config.outputDir}")
         Log.i(TAG, "间隔: ${config.intervalSeconds}秒")
         Log.i(TAG, "硬件加速: ${config.useHardwareEncoder}")
-        Log.i(TAG, "并行处理: ${config.enableParallel}")
-        
+        Log.i(TAG, "处理模式: 串行（针对低端设备优化）")
+
         val startTime = System.currentTimeMillis()
-        
+
         // 初始化编码器配置
         currentConfig = EncoderConfigFactory.getBestConfig(
             preferHardware = config.useHardwareEncoder,
@@ -135,28 +136,24 @@ class SmartVideoSplitter(
             qualityPreset = config.qualityPreset
         )
         hardwareFailCount = 0
-        
+
         Log.i(TAG, "使用编码器: ${currentConfig!!.description}")
-        
+
         // 计算分段信息
         val segmentList = calculateSegments(
             durationMs = config.videoDurationMs,
             intervalSeconds = config.intervalSeconds
         )
-        
+
         Log.i(TAG, "预计生成 ${segmentList.size} 个片段")
-        
+
         // 确保输出目录存在
         if (!config.outputDir.exists()) {
             config.outputDir.mkdirs()
         }
-        
-        // 执行分割
-        val results = if (config.enableParallel && segmentList.size > 1) {
-            splitParallel(config, segmentList, onProgress)
-        } else {
-            splitSequential(config, segmentList, onProgress)
-        }
+
+        // 强制串行处理（移除并行逻辑）
+        val results = splitSequential(config, segmentList, onProgress)
         
         // 统计结果
         val successFiles = results.filter { it.success }.mapNotNull { it.outputFile }
@@ -208,7 +205,7 @@ class SmartVideoSplitter(
     }
     
     /**
-     * 顺序分割
+     * 顺序分割（串行处理，使用全局 Mutex 锁）
      */
     private suspend fun splitSequential(
         config: SplitConfig,
@@ -235,23 +232,25 @@ class SmartVideoSplitter(
                 ))
             }
 
-            // 处理片段
-            val result = processSegment(
-                config = config,
-                segment = segment,
-                index = index,
-                totalSegments = segmentList.size,
-                onSegmentProgress = { segmentProgress ->
-                    val overall = ((index + segmentProgress / 100f) / segmentList.size * 100).toInt()
-                    onProgress(Progress(
-                        currentSegment = index + 1,
-                        totalSegments = segmentList.size,
-                        segmentProgress = segmentProgress,
-                        overallProgress = overall,
-                        status = "片段 ${index + 1}/${segmentList.size} 编码中: $segmentProgress%"
-                    ))
-                }
-            )
+            // 使用全局 Mutex 锁确保串行处理
+            val result = processingMutex.withLock {
+                processSegment(
+                    config = config,
+                    segment = segment,
+                    index = index,
+                    totalSegments = segmentList.size,
+                    onSegmentProgress = { segmentProgress ->
+                        val overall = ((index + segmentProgress / 100f) / segmentList.size * 100).toInt()
+                        onProgress(Progress(
+                            currentSegment = index + 1,
+                            totalSegments = segmentList.size,
+                            segmentProgress = segmentProgress,
+                            overallProgress = overall,
+                            status = "片段 ${index + 1}/${segmentList.size} 编码中: $segmentProgress%"
+                        ))
+                    }
+                )
+            }
 
             results.add(result)
 
@@ -296,21 +295,24 @@ class SmartVideoSplitter(
                     Log.d(TAG, "删除失败片段的旧文件: ${oldFile.name}")
                 }
 
-                val retryResult = processSegment(
-                    config = config,
-                    segment = segment,
-                    index = originalIndex,
-                    totalSegments = segmentList.size,
-                    onSegmentProgress = { segmentProgress ->
-                        onProgress(Progress(
-                            currentSegment = originalIndex + 1,
-                            totalSegments = segmentList.size,
-                            segmentProgress = segmentProgress,
-                            overallProgress = 95,
-                            status = "重试片段 ${originalIndex + 1} 编码中: $segmentProgress%"
-                        ))
-                    }
-                )
+                // 使用全局 Mutex 锁确保串行处理
+                val retryResult = processingMutex.withLock {
+                    processSegment(
+                        config = config,
+                        segment = segment,
+                        index = originalIndex,
+                        totalSegments = segmentList.size,
+                        onSegmentProgress = { segmentProgress ->
+                            onProgress(Progress(
+                                currentSegment = originalIndex + 1,
+                                totalSegments = segmentList.size,
+                                segmentProgress = segmentProgress,
+                                overallProgress = 95,
+                                status = "重试片段 ${originalIndex + 1} 编码中: $segmentProgress%"
+                            ))
+                        }
+                    )
+                }
 
                 // 替换原来失败的结果
                 val resultIndex = results.indexOfFirst { it.index == originalIndex }
@@ -328,52 +330,7 @@ class SmartVideoSplitter(
 
         results
     }
-    
-    /**
-     * 并行分割
-     */
-    private suspend fun splitParallel(
-        config: SplitConfig,
-        segmentList: List<SegmentInfo>,
-        onProgress: (Progress) -> Unit
-    ): List<SegmentResult> = coroutineScope {
-        
-        val completedCount = AtomicInteger(0)
-        val semaphore = Semaphore(parallelCount)
-        
-        Log.i(TAG, "并行处理: 最大并发数=$parallelCount")
-        
-        val deferredResults = segmentList.mapIndexed { index, segment ->
-            async {
-                semaphore.withPermit {
-                    val result = processSegment(
-                        config = config,
-                        segment = segment,
-                        index = index,
-                        totalSegments = segmentList.size,
-                        onSegmentProgress = { }
-                    )
-                    
-                    // 更新总进度
-                    val completed = completedCount.incrementAndGet()
-                    withContext(Dispatchers.Main) {
-                        onProgress(Progress(
-                            currentSegment = completed,
-                            totalSegments = segmentList.size,
-                            segmentProgress = 100,
-                            overallProgress = (completed * 100) / segmentList.size,
-                            status = "已完成 $completed/${segmentList.size}"
-                        ))
-                    }
-                    
-                    result
-                }
-            }
-        }
-        
-        deferredResults.awaitAll()
-    }
-    
+
     /**
      * 处理单个片段
      * 硬件编码走 MediaCodec，软件编码走 FFmpeg
