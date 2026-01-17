@@ -41,6 +41,7 @@ class MediaCodecSplitter {
         var muxer: MediaMuxer? = null
         var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
+        var inputSurface: android.view.Surface? = null
 
         try {
             // 1. 初始化 MediaExtractor
@@ -85,10 +86,10 @@ class MediaCodecSplitter {
             }
 
             encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val inputSurface = encoder.createInputSurface()
+            inputSurface = encoder.createInputSurface()
             encoder.start()
 
-            // 6. 创建解码器，输出到编码器的 Surface
+            // 6. 创建解码器，输出到编码器的 Surface（Zero-Copy）
             decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(inputFormat, inputSurface, null, 0)
             decoder.start()
@@ -117,32 +118,56 @@ class MediaCodecSplitter {
             var decoderDone = false
             var encoderDone = false
 
-            // 11. 解码-编码循环
-            val timeoutUs = 1000L  // 1ms，减少等待时间
-            var stallCount = 0
-            val maxStallCount = 3000  // 最多空转3秒
+            // 11. 解码-编码循环（针对低端设备优化）
+            val timeoutUs = 10000L  // 10ms 超时
+            val loopStartTime = System.currentTimeMillis()
+
+            // 基于时间的超时：每个片段最多处理 10 分钟（针对长片段和低端设备）
+            val maxLoopTimeMs = 600000L  // 10 分钟
+
+            // 基于空转次数的超时：连续空转 30000 次才报错（约 300 秒）
+            var consecutiveEmptyCount = 0
+            val maxConsecutiveEmpty = 30000
+
+            var lastProgressTime = System.currentTimeMillis()
 
             while (!encoderDone && isActive) {
                 var didWork = false
 
+                // 检查总超时（基于时间）
+                val elapsedMs = System.currentTimeMillis() - loopStartTime
+                if (elapsedMs > maxLoopTimeMs) {
+                    Log.e(TAG, "处理超时（${elapsedMs}ms），强制退出")
+                    throw IllegalStateException("视频处理超时，可能是硬件编码器卡死")
+                }
+
                 // 喂数据给解码器
                 if (!inputDone) {
                     val inputBufferIndex = decoder.dequeueInputBuffer(timeoutUs)
-                    if (inputBufferIndex >= 0) {
-                        didWork = true
-                        val inputBuffer = decoder.getInputBuffer(inputBufferIndex)!!
-                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                    when {
+                        inputBufferIndex >= 0 -> {
+                            didWork = true
+                            val inputBuffer = decoder.getInputBuffer(inputBufferIndex)!!
+                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
 
-                        if (sampleSize < 0 || extractor.sampleTime > segment.endTimeUs) {
-                            decoder.queueInputBuffer(inputBufferIndex, 0, 0, 0,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
-                            Log.d(TAG, "输入完成")
-                        } else {
-                            val presentationTimeUs = extractor.sampleTime - segment.startTimeUs
-                            decoder.queueInputBuffer(inputBufferIndex, 0, sampleSize,
-                                presentationTimeUs.coerceAtLeast(0), 0)
-                            extractor.advance()
+                            if (sampleSize < 0 || extractor.sampleTime > segment.endTimeUs) {
+                                decoder.queueInputBuffer(inputBufferIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inputDone = true
+                                Log.d(TAG, "输入完成")
+                            } else {
+                                val presentationTimeUs = extractor.sampleTime - segment.startTimeUs
+                                decoder.queueInputBuffer(inputBufferIndex, 0, sampleSize,
+                                    presentationTimeUs.coerceAtLeast(0), 0)
+                                extractor.advance()
+                            }
+                        }
+                        inputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                            // 硬件正在忙，这是正常现象，不计入超时
+                        }
+                        else -> {
+                            // 其他错误码，记录但不中断
+                            Log.w(TAG, "解码器 dequeueInputBuffer 返回: $inputBufferIndex")
                         }
                     }
                 }
@@ -163,7 +188,15 @@ class MediaCodecSplitter {
                             }
                         }
                         decoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                            didWork = true
                             Log.d(TAG, "解码器输出格式变化")
+                        }
+                        decoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                            // 硬件正在忙，这是正常现象，不计入超时
+                        }
+                        else -> {
+                            // 其他状态码，记录但不中断
+                            Log.w(TAG, "解码器 dequeueOutputBuffer 返回: $decoderStatus")
                         }
                     }
                 }
@@ -193,6 +226,8 @@ class MediaCodecSplitter {
                             val progress = ((bufferInfo.presentationTimeUs * 100) / totalDurationUs)
                                 .toInt().coerceIn(0, 100)
                             onProgress(progress)
+
+                            lastProgressTime = System.currentTimeMillis()
                         }
 
                         encoder.releaseOutputBuffer(encoderStatus, false)
@@ -202,16 +237,30 @@ class MediaCodecSplitter {
                             Log.d(TAG, "编码完成")
                         }
                     }
+                    encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                        // 硬件正在忙，这是正常现象，不计入超时
+                    }
+                    else -> {
+                        // 其他状态码，记录但不中断
+                        Log.w(TAG, "编码器 dequeueOutputBuffer 返回: $encoderStatus")
+                    }
                 }
 
-                // 防止死循环
+                // 防止死循环（只有真正空转才计数）
                 if (didWork) {
-                    stallCount = 0
+                    consecutiveEmptyCount = 0
                 } else {
-                    stallCount++
-                    if (stallCount > maxStallCount) {
-                        Log.w(TAG, "循环超时，强制退出")
-                        break
+                    consecutiveEmptyCount++
+
+                    // 每 5000 次空转记录一次日志，帮助调试
+                    if (consecutiveEmptyCount % 5000 == 0) {
+                        val timeSinceProgress = System.currentTimeMillis() - lastProgressTime
+                        Log.d(TAG, "空转计数: $consecutiveEmptyCount, 距上次进度: ${timeSinceProgress}ms")
+                    }
+
+                    if (consecutiveEmptyCount > maxConsecutiveEmpty) {
+                        Log.e(TAG, "连续空转超过阈值（${consecutiveEmptyCount}次），强制退出")
+                        throw IllegalStateException("硬件编码器长时间无响应，可能不兼容")
                     }
                 }
             }
@@ -228,16 +277,70 @@ class MediaCodecSplitter {
             Log.e(TAG, "分割失败: ${e.message}", e)
             SegmentResult(false, null, e.message ?: "未知错误")
         } finally {
+            // 严格按顺序释放资源
             try {
-                decoder?.stop()
-                decoder?.release()
-                encoder?.stop()
-                encoder?.release()
-                muxer?.stop()
-                muxer?.release()
-                extractor?.release()
+                // 1. 停止并释放解码器
+                decoder?.let {
+                    try {
+                        it.stop()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "停止解码器失败: ${e.message}")
+                    }
+                    try {
+                        it.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "释放解码器失败: ${e.message}")
+                    }
+                }
+
+                // 2. 停止并释放编码器
+                encoder?.let {
+                    try {
+                        it.stop()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "停止编码器失败: ${e.message}")
+                    }
+                    try {
+                        it.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "释放编码器失败: ${e.message}")
+                    }
+                }
+
+                // 3. 显式释放 Surface
+                inputSurface?.let {
+                    try {
+                        it.release()
+                        Log.d(TAG, "Surface 已释放")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "释放 Surface 失败: ${e.message}")
+                    }
+                }
+
+                // 4. 停止并释放 Muxer
+                muxer?.let {
+                    try {
+                        it.stop()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "停止 Muxer 失败: ${e.message}")
+                    }
+                    try {
+                        it.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "释放 Muxer 失败: ${e.message}")
+                    }
+                }
+
+                // 5. 释放 Extractor
+                extractor?.let {
+                    try {
+                        it.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "释放 Extractor 失败: ${e.message}")
+                    }
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "释放资源时出错: ${e.message}")
+                Log.e(TAG, "释放资源时出错: ${e.message}")
             }
         }
     }
