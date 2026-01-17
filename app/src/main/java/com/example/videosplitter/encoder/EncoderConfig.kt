@@ -21,40 +21,14 @@ data class EncoderConfig(
     }
 
     /**
-     * 构建 FFmpeg 输出参数
+     * 构建 FFmpeg 输出参数（仅用于软件编码）
      */
     fun buildOutputParams(): List<String> {
-        val sanitizedVideoParams = if (isHardwareAccelerated && videoCodec == "h264_mediacodec") {
-            removeUnsupportedMediaCodecParams(videoCodecParams)
-        } else {
-            videoCodecParams
-        }
         return mutableListOf<String>().apply {
             addAll(listOf("-c:v", videoCodec))
-            addAll(sanitizedVideoParams)
+            addAll(videoCodecParams)
             addAll(listOf("-c:a", "aac", "-b:a", "128k"))
         }
-    }
-
-    private fun removeUnsupportedMediaCodecParams(params: List<String>): List<String> {
-        val unsupportedFlags = setOf("-profile:v", "-profile", "-level", "-level:v")
-        val sanitized = mutableListOf<String>()
-        var skipNext = false
-        for (param in params) {
-            if (skipNext) {
-                skipNext = false
-                continue
-            }
-            if (unsupportedFlags.contains(param)) {
-                skipNext = true
-                continue
-            }
-            if (param.startsWith("-profile") || param.startsWith("-level")) {
-                continue
-            }
-            sanitized.add(param)
-        }
-        return sanitized
     }
 
     companion object {
