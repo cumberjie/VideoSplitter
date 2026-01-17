@@ -66,9 +66,8 @@ object EncoderConfigFactory {
     }
     
     /**
-     * 获取硬件编码配置
-     * 注意：部分低端设备（如华为畅享系列）对 -maxrate/-bufsize 参数不兼容
-     * 使用简化参数提高兼容性
+     * 获取硬件编码配置（纯 MediaCodec，不使用 FFmpeg）
+     * 注意：此配置仅用于标识，实际编码由 MediaCodecSplitter 完成
      */
     fun getHardwareConfig(
         videoWidth: Int = 1920,
@@ -76,20 +75,11 @@ object EncoderConfigFactory {
         qualityPreset: QualityPreset = QualityPreset.BALANCED
     ): EncoderConfig {
 
-        // 根据分辨率计算推荐比特率
-        val bitrate = calculateRecommendedBitrate(videoWidth, videoHeight, qualityPreset)
-        val bitrateM = (bitrate / 1_000_000).coerceAtLeast(1)
-
         return EncoderConfig(
-            videoCodec = "h264_mediacodec",
-            videoCodecParams = listOf(
-                "-b:v", "${bitrateM}M",
-                "-g", "30",              // 关键帧间隔，MediaCodec 必需参数
-                "-profile:v", "main",    // H.264 Main Profile，兼容性好
-                "-level", "4.0"          // 支持 1080p@30fps
-            ),
+            videoCodec = "mediacodec",  // 标识使用纯 MediaCodec
+            videoCodecParams = emptyList(),  // MediaCodec 不需要 FFmpeg 参数
             isHardwareAccelerated = true,
-            description = "🚀 硬件加速编码 (MediaCodec)",
+            description = "🚀 硬件加速编码 (纯 MediaCodec)",
             qualityLevel = when (qualityPreset) {
                 QualityPreset.FAST -> EncoderConfig.QualityLevel.MEDIUM
                 QualityPreset.BALANCED -> EncoderConfig.QualityLevel.HIGH
@@ -127,27 +117,6 @@ object EncoderConfigFactory {
         )
     }
     
-    /**
-     * 根据分辨率和质量预设计算推荐比特率
-     */
-    private fun calculateRecommendedBitrate(
-        width: Int,
-        height: Int,
-        qualityPreset: QualityPreset
-    ): Long {
-        // 基础比特率（每像素）- 大幅提高以接近原画质
-        val bitsPerPixel = when (qualityPreset) {
-            QualityPreset.FAST -> 0.15      // 提高到 0.15
-            QualityPreset.BALANCED -> 0.25  // 提高到 0.25
-            QualityPreset.QUALITY -> 0.40   // 提高到 0.40（接近原画质）
-        }
-
-        val pixels = width * height
-        val baseBitrate = (pixels * bitsPerPixel * 30).toLong() // 假设 30fps
-
-        // 限制比特率范围，提高 MediaCodec 兼容性
-        return baseBitrate.coerceIn(2_000_000L, 20_000_000L)
-    }
     
     /**
      * 获取编码器描述信息（用于 UI 显示）
